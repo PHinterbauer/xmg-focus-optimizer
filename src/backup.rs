@@ -350,7 +350,7 @@ pub fn list_archives() -> AppResult<Vec<ArchiveEntry>> {
 // ---------------------------------------------------------------- restore ---
 
 /// Where a restore should read from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RestoreSource {
     /// The active initial (factory) backup.
     Factory,

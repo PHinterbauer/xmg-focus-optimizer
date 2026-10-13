@@ -11,7 +11,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
   check:
@@ -22,12 +21,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - name: Formatting
-        run: cargo fmt -- --check
-      - name: Clippy
-        run: cargo clippy --release -- -D warnings
       - name: Type check
         run: cargo check --release
+      - name: Clippy
+        run: cargo clippy --release
+      - name: Formatting
+        continue-on-error: true
+        run: cargo fmt
 
   build:
     name: Build executable

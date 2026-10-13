@@ -1,19 +1,19 @@
 //! Small Windows helpers: elevation, power state, single-instance lock.
 
-use std::sync::Mutex;
-
 // ------------------------------------------------------------- elevation ---
 
 /// `true` when this process holds an elevated (administrator) token.
 pub fn is_elevated() -> bool {
     #[cfg(windows)]
     {
-        use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::Security::{
+            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+        };
         use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-        use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
         unsafe {
-            let mut token = HANDLE::default();
+            let mut token = windows::Win32::Foundation::HANDLE::default();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
                 return false;
             }
@@ -46,8 +46,7 @@ pub fn on_ac_power() -> bool {
     {
         use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
         let mut st = SYSTEM_POWER_STATUS::default();
-        let ok = unsafe { GetSystemPowerStatus(&mut st) }.as_bool();
-        if ok {
+        if unsafe { GetSystemPowerStatus(&mut st) }.as_bool() {
             // 1 = AC, 0 = battery, 255 = unknown
             return st.ACLineStatus != 0;
         }
@@ -70,15 +69,14 @@ pub fn battery_percent() -> Option<u8> {
 
 // -------------------------------------------------------- single instance ---
 
-static INSTANCE: Mutex<Option<SingleInstance>> = Mutex::new(None);
-
+#[cfg(windows)]
 pub struct SingleInstance {
     handle: windows::Win32::Foundation::HANDLE,
 }
 
+#[cfg(windows)]
 impl Drop for SingleInstance {
     fn drop(&mut self) {
-        #[cfg(windows)]
         unsafe {
             let _ = windows::Win32::Foundation::CloseHandle(self.handle);
         }
@@ -91,75 +89,67 @@ impl Drop for SingleInstance {
 /// instance was killed) counts as acquired, because nobody else holds it -
 /// refusing here would leave the app permanently unlaunchable.
 #[cfg(windows)]
-pub fn acquire_single_instance(name: &str) -> Result<SingleInstance, ()> {
-    use windows::Win32::Foundation::{CompareStringOrdinal, HANDLE};
-    use windows::Win32::System::Threading::{CreateMutexW, Mutex, WaitForSingleObject, INFINITE};
+pub fn acquire_single_instance(_name: &str) -> Result<SingleInstance, ()> {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
 
-    let wide = crate::wide(name);
+    let wide = wide(_name);
     unsafe {
         let handle: HANDLE = CreateMutexW(None, true, windows::core::PCWSTR(wide.as_ptr()));
         if handle.is_invalid() {
-            // Could not even create it - fall through and let the app run.
+            // Could not even create it - let the app run rather than refuse.
             return Ok(SingleInstance { handle });
         }
         match WaitForSingleObject(handle, 0) {
-            // WAIT_OBJECT_0 / WAIT_ABANDONED both mean the lock is ours now.
-            0 => Ok(SingleInstance { handle }),
+            // 0 = WAIT_OBJECT_0, 0x80 = WAIT_ABANDONED. Both mean we own it now.
+            0 | 0x80 => Ok(SingleInstance { handle }),
             _ => {
                 let _ = CloseHandle(handle);
                 Err(())
             }
         }
     }
-    .map_err(|_| ())
 }
 
-/// Sends the "show yourself" signal to an already running instance.
+#[cfg(not(windows))]
+pub struct SingleInstance;
+
+#[cfg(not(windows))]
+impl Drop for SingleInstance {
+    fn drop(&mut self) {}
+}
+
+#[cfg(not(windows))]
+pub fn acquire_single_instance(_name: &str) -> Result<SingleInstance, ()> {
+    Ok(SingleInstance)
+}
+
+/// Signals an already running instance to bring its window forward.
 #[cfg(windows)]
 pub fn notify_existing_instance(name: &str) {
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Threading::{CreateEventW, OpenEventW, SetEvent, EVENT_MODIFY_STATE, SYNCHRONIZE};
-
-    let event_name = crate::wide(&format!("{name}-show-event"));
-    unsafe {
-        let h = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, false, windows::core::PCWSTR(event_name.as_ptr()));
-        if let Ok(h) = h {
-            if !h.is_invalid() {
-                let _ = SetEvent(h);
-                let _ = windows::Win32::Foundation::CloseHandle(h);
-            }
-        }
-        // Also make sure the event exists for future instances.
-        let _ = CreateEventW(
-            None,
-            true,
-            false,
-            windows::core::PCWSTR(crate::wide(&format!("{name}-show")).as_ptr()),
-        );
-    }
-}
-
-/// Blocks until the "show" event is signalled, then clears it.
-#[cfg(windows)]
-pub fn wait_for_show_event(name: &str, timeout_ms: u32) {
     use windows::Win32::System::Threading::{
-        CreateEventW, OpenEventW, ResetEvent, WaitForSingleObject, EVENT_MODIFY_STATE, SYNCHRONIZE,
+        OpenEventW, SetEvent, EVENT_MODIFY_STATE, SYNCHRONIZE,
     };
 
-    let name = format!("{name}-show");
+    let event_name = wide(&format!("{name}-show"));
     unsafe {
-        let h = OpenEventW(SYNCHRONIZE | EVENT_MODIFY_STATE, false, windows::core::PCWSTR(crate::wide(&name).as_ptr()));
-        if let Ok(h) = h {
-            if !h.is_invalid() {
-                let _ = WaitForSingleObject(h, timeout_ms);
-                let _ = ResetEvent(h);
-                let _ = windows::Win32::Foundation::CloseHandle(h);
+        match OpenEventW(
+            SYNCHRONIZE | EVENT_MODIFY_STATE,
+            false,
+            windows::core::PCWSTR(event_name.as_ptr()),
+        ) {
+            Ok(h) if !h.is_invalid() => {
+                let _ = SetEvent(h);
+                let _ = windows::Win32::Foundation::CloseHandle(HANDLE(h.0));
             }
+            _ => {}
         }
-        // Ensure the event exists for the next launch.
-        let _ = CreateEventW(None, true, false, windows::core::PCWSTR(crate::wide(&name).as_ptr()));
     }
 }
+
+#[cfg(not(windows))]
+pub fn notify_existing_instance(_name: &str) {}
 
 /// Converts a Rust string to a NUL-terminated UTF-16 buffer.
 #[cfg(windows)]

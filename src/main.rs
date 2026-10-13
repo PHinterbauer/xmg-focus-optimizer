@@ -198,8 +198,8 @@ fn run_gui(start_hidden: bool) {
     let run = eframe::run_native(
         "XMG Optimizer",
         native,
-        Box::new(move |cc| {
-            Ok(Box::new(ui::App::new(
+        Box::new(move |_cc| {
+            let app: Box<dyn eframe::App> = Box::new(ui::App::new(
                 settings_for_app,
                 rx_tray,
                 rx_monitor,
@@ -207,7 +207,8 @@ fn run_gui(start_hidden: bool) {
                 tx_monitor,
                 stop_watch,
                 hidden,
-            )))
+            ));
+            Ok(app)
         }),
     );
 

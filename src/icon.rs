@@ -173,59 +173,10 @@ pub fn load(mode: Mode) -> tray_icon::Icon {
     }
 }
 
-/// Writes the icon into the window's title bar via `WM_SETICON`.
-#[cfg(windows)]
-pub fn set_window_icon(hwnd: std::os::windows::raw::HWND, mode: Mode) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETICON, ICON_SMALL, ICON_BIG};
-    let _ = hwnd;
-
-    let h = HWND(hwnd as *mut std::ffi::c_void);
-    // Tray icons are 32-bit ARGB DIBs; build a small and a large one.
-    for (size, which) in [(32usize, ICON_BIG), (16usize, ICON_SMALL)] {
-        let img = draw(size as u32, mode);
-        // BGRA + unused mask, bottom-up.
-        let mut dib = vec![0u8; 40 + (size as u32 * size as u32 * 4)];
-        dib[0..4].copy_from_slice(&40u32.to_le_bytes()); // biSize
-        dib[4..8].copy_from_slice(&(size as i32).to_le_bytes()); // biWidth
-        dib[8..12].copy_from_slice(&((size as i32) * 2).to_le_bytes()); // biHeight (XOR+AND)
-        dib[12..14].copy_from_slice(&1u16.to_le_bytes()); // biPlanes
-        dib[14..16].copy_from_slice(&32u16.to_le_bytes()); // biBitCount
-        dib[16..20].copy_from_slice(&0u32.to_le_bytes()); // BI_RGB
-
-        let stride = size as u32 * 4;
-        for row in 0..size as u32 {
-            let src_row = (size as u32 - 1 - row) as usize;
-            let src_off = src_row * stride as usize;
-            let dst_off = (40 + row as usize * stride as usize) as usize;
-            for i in 0..size as u32 {
-                let r = img.px[src_off + i as usize * 4] as u32;
-                let g = img.px[src_off + i as usize * 4 + 1] as u32;
-                let b = img.px[src_off + i as usize * 4 + 2] as u32;
-                let a = img.px[src_off + i as usize * 4 + 3] as u32;
-                let o = dst_off + i as usize * 4;
-                dib[o] = (b * a / 255) as u8;
-                dib[o + 1] = (g * a / 255) as u8;
-                dib[o + 2] = (r * a / 255) as u8;
-                dib[o + 3] = a as u8;
-            }
-        }
-
-        unsafe {
-            let hicon = windows::Win32::UI::WindowsAndMessaging::CreateIconFromResourceEx(
-                Some(dib.as_ptr()),
-                None,
-                true,
-                0,
-                0,
-                size as i32,
-                size as i32,
-                None,
-            );
-            if let Ok(hicon) = hicon {
-                let _ = SendMessageW(h, WM_SETICON, Some(which.0 as usize), Some(windows::Win32::Foundation::LPARAM(hicon.0 as isize)));
-                let _ = windows::Win32::Graphics::Gdi::DeleteObject(hicon.into());
-            }
-        }
+/// Human-readable description of the icon colours, used in the About area.
+pub fn describe(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Quiet => "calm blue",
+        Mode::Performance => "warm amber",
     }
 }

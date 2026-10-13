@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
-use egui::{Align, CornerRadius, Layout, RichText, Stroke, Vec2, Widget};
+use egui::{Align, CornerRadius, Layout, RichText, Stroke, Vec2};
 
 use crate::backup::{self, ArchiveEntry, RestoreSource, SnapshotInfo};
 use crate::config::{Settings, Theme};
@@ -508,9 +508,6 @@ impl App {
                 if clicked && !selected {
                     self.settings.mode = *mode;
                     let _ = self.settings.save();
-                    if let Some(t) = tray_icon::TrayIcon::find_by_id(&"") {
-                        let _ = t;
-                    }
                 }
             }
         });

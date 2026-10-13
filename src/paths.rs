@@ -114,29 +114,35 @@ fn known_folder_documents() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         use windows::core::PWSTR;
+        use windows::Win32::System::Com::CoTaskMemFree;
         use windows::Win32::UI::Shell::SHGetKnownFolderPath;
-        use windows::Win32::UI::Shell::FOLDERID_Documents;
 
+        // FOLDERID_Documents = {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
         unsafe {
             let mut ptr: *mut PWSTR = std::ptr::null_mut();
-            // FOLDERID_Documents = {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
-            if SHGetKnownFolderPath(&FOLDERID_Documents, 0, None, &mut ptr).is_ok() && !ptr.is_null() {
-                let s = windows::core::PCWSTR(ptr.0).to_string().ok();
-                let _ = windows::Win32::System::Com::CoTaskMemFree(Some(ptr.cast()));
-                if let Some(s) = s {
-                    if !s.is_empty() {
-                        return Some(PathBuf::from(s));
-                    }
+            let hr = SHGetKnownFolderPath(
+                windows::core::GUID::from_u128(0xfdd39ad0_238f_46af_adb4_6c85480369c7),
+                Default::default(),
+                windows::Win32::Foundation::HANDLE(0),
+            );
+            if hr.is_ok() && !ptr.is_null() {
+                let text = windows::core::PCWSTR(ptr.0).to_string().unwrap_or_default();
+                let _ = CoTaskMemFree(Some(ptr.cast()));
+                if !text.is_empty() {
+                    return Some(PathBuf::from(text));
                 }
             }
         }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = ();
-    }
+    fallback_documents()
+}
+
+fn fallback_documents() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
-        .filter(|p| p.file_name().map(|n| n == "Documents").unwrap_or(false))
-        .map(|p| p.parent().map(|d| d.join("Documents")).unwrap_or(p))
+        .filter(|p| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().eq_ignore_ascii_case("Documents"))
+                .unwrap_or(false)
+        })
 }

@@ -4,7 +4,7 @@
 //! the tray" rather than "quit" - which is what keeps the power watcher alive.
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
@@ -12,12 +12,14 @@ use egui::{Align, CornerRadius, Layout, RichText, Stroke, Vec2};
 
 use crate::backup::{self, ArchiveEntry, RestoreSource, SnapshotInfo};
 use crate::config::{Settings, Theme};
+use crate::drift::{self, DriftReport};
 use crate::elevate;
 use crate::icon;
 use crate::jobs::{self, Job, JobResult};
 use crate::monitor::MonitorEvent;
 use crate::power;
 use crate::profile::{self, Mode};
+use crate::startup;
 use crate::sysutil;
 use crate::tray::{self, TrayCommand};
 use crate::worker;
@@ -51,19 +53,24 @@ pub struct App {
     busy: bool,
     notes: Vec<Note>,
 
+    /// Live comparison of the selected mode against the machine's real settings.
+    drift: Option<DriftReport>,
+    /// The user chose to keep the current settings; re-armed on any change.
+    drift_acknowledged: bool,
+    drift_expanded: bool,
+
     snapshots: Vec<SnapshotInfo>,
     archives: Vec<ArchiveEntry>,
     backup_dir: PathBuf,
     has_factory: bool,
 
-    /// Multi-step confirmation for creating a new initial backup.
     confirm_stage: u8,
     confirm_note: String,
 
     theme_applied: Option<Theme>,
     tray_alive: bool,
+    autostarted: bool,
 
-    // channels
     tray_rx: Receiver<TrayCommand>,
     monitor_rx: Receiver<MonitorEvent>,
     tx_tray: Sender<TrayCommand>,
@@ -72,8 +79,10 @@ pub struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         settings: Settings,
+        autostarted: bool,
         tray_rx: Receiver<TrayCommand>,
         monitor_rx: Receiver<MonitorEvent>,
         tx_tray: Sender<TrayCommand>,
@@ -82,7 +91,7 @@ impl App {
         start_hidden: bool,
     ) -> Self {
         let on_ac = power::on_ac_power();
-        let (snapshots, archives, backup_dir, has_factory) = self::state().unwrap_or_default();
+        let (snapshots, archives, backup_dir, has_factory) = Self::state().unwrap_or_default();
 
         let mut app = App {
             settings,
@@ -91,6 +100,9 @@ impl App {
             elevated_ready: elevate::task_exists(),
             busy: false,
             notes: Vec::new(),
+            drift: None,
+            drift_acknowledged: false,
+            drift_expanded: false,
             snapshots,
             archives,
             backup_dir,
@@ -99,16 +111,33 @@ impl App {
             confirm_note: String::new(),
             theme_applied: None,
             tray_alive: false,
+            autostarted,
             tray_rx,
             monitor_rx,
             tx_tray,
             _tx_monitor: tx_monitor,
-            stop_watch: stop_watch,
+            stop_watch,
         };
+
         if start_hidden {
             app.hide_to_tray();
         }
         app.refresh();
+        app.reconcile_autostart();
+
+        // Launched by Windows: silently put the saved mode back in place.
+        // Because applying is idempotent this normally changes nothing at all -
+        // it just guarantees the laptop came up the way the user left it.
+        if autostarted {
+            app.recheck_drift();
+            app.submit_now(Job::Apply {
+                mode: app.settings.mode,
+                control_fans: app.settings.control_fans,
+                control_gpu: app.settings.control_gpu_limit,
+            });
+        } else {
+            app.recheck_drift();
+        }
         app
     }
 
@@ -130,9 +159,27 @@ impl App {
         self.on_ac = power::on_ac_power();
     }
 
+    /// Makes the registry agree with the stored preference.
+    fn reconcile_autostart(&mut self) {
+        if startup::reconcile_autostart(self.settings.start_with_system) {
+            self.note(
+                if self.settings.start_with_system {
+                    "registered to start with Windows"
+                } else {
+                    "removed from start-up"
+                },
+                NoteKind::Ok,
+            );
+        }
+    }
+
+    fn recheck_drift(&mut self) {
+        self.drift = Some(drift::check(self.settings.mode, self.on_ac));
+    }
+
     fn hide_to_tray(&mut self) {
-        let ctx = egui::Context::current();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        egui::Context::current()
+            .send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
     fn show_window(&mut self, ctx: &egui::Context) {
@@ -163,6 +210,13 @@ impl App {
             self.note(format!("  ! {w}"), NoteKind::Warn);
         }
         self.refresh();
+        self.recheck_drift();
+    }
+
+    /// Submits a job, bypassing the busy guard (used for the start-up re-apply).
+    fn submit_now(&mut self, job: Job) {
+        self.busy = true;
+        elevate::submit(job);
     }
 
     fn submit(&mut self, job: Job) {
@@ -170,8 +224,16 @@ impl App {
             self.note("still working on the previous request", NoteKind::Warn);
             return;
         }
-        self.busy = true;
-        elevate::submit(job);
+        self.submit_now(job);
+    }
+
+    fn apply_current_mode(&mut self) {
+        let s = self.settings.clone();
+        self.submit(Job::Apply {
+            mode: s.mode,
+            control_fans: s.control_fans,
+            control_gpu: s.control_gpu_limit,
+        });
     }
 
     // ------------------------------------------------------------- events --
@@ -180,34 +242,39 @@ impl App {
         while let Ok(cmd) = self.tray_rx.try_recv() {
             match cmd {
                 TrayCommand::Show => self.show_window(ctx),
-                TrayCommand::Apply(m) => self.settings.mode = m,
+                TrayCommand::Apply(m) => {
+                    if self.settings.mode != m {
+                        self.settings.mode = m;
+                        let _ = self.settings.save();
+                        self.drift_acknowledged = false;
+                        self.apply_current_mode();
+                    }
+                }
                 TrayCommand::Restore => {
                     self.tab = Tab::Backups;
                     self.show_window(ctx);
                 }
                 TrayCommand::Quit => {
-                    self.stop_watch
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    self.stop_watch.store(true, Ordering::Relaxed);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
         }
 
         while let Ok(ev) = self.monitor_rx.try_recv() {
-            match ev {
-                MonitorEvent::PowerChanged { on_ac, mode, triggered } => {
-                    self.on_ac = on_ac;
-                    if triggered {
-                        self.note(
-                            format!(
-                                "power source changed to {} - re-applied {mode}",
-                                if on_ac { "mains" } else { "battery" }
-                            ),
-                            NoteKind::Ok,
-                        );
-                    }
+            if let MonitorEvent::PowerChanged { on_ac, mode, triggered } = ev {
+                self.on_ac = on_ac;
+                if triggered {
+                    self.note(
+                        format!(
+                            "power source changed to {} - re-applied {mode}",
+                            if on_ac { "mains" } else { "battery" }
+                        ),
+                        NoteKind::Ok,
+                    );
+                    self.drift_acknowledged = false;
                 }
-                MonitorEvent::Error(e) => self.note(e, NoteKind::Err),
+                self.recheck_drift();
             }
         }
 
@@ -231,7 +298,6 @@ fn accent(mode: Mode, dark: bool) -> egui::Color32 {
     }
 }
 
-/// A selectable card. Returns true when clicked.
 fn card<R>(
     ui: &mut egui::Ui,
     selected: bool,
@@ -289,7 +355,6 @@ fn pill(ui: &mut egui::Ui, text: &str, good: bool) {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // theme ------------------------------------------------------------
         let want = match self.settings.theme {
             Theme::System => None,
             Theme::Light => Some(egui::Visuals::light()),
@@ -298,13 +363,6 @@ impl eframe::App for App {
         if self.theme_applied != self.settings.theme {
             if let Some(v) = want {
                 ctx.set_visuals(v);
-            } else {
-                let sys = ctx.style().visuals.clone();
-                ctx.set_visuals(if sys.dark_mode {
-                    egui::Visuals::dark()
-                } else {
-                    egui::Visuals::light()
-                });
             }
             self.theme_applied = self.settings.theme;
         }
@@ -324,11 +382,7 @@ impl eframe::App for App {
                         egui::Image::new(&icon::texture(ctx, self.settings.mode))
                             .fit_to_exact_size(Vec2::new(24.0, 24.0)),
                     );
-                    ui.label(
-                        RichText::new("XMG Optimizer")
-                            .size(15.0)
-                            .strong(),
-                    );
+                    ui.label(RichText::new("XMG Optimizer").size(15.0).strong());
                     ui.add_space(8.0);
                     pill(
                         ui,
@@ -338,7 +392,6 @@ impl eframe::App for App {
                     if self.busy {
                         ui.spinner();
                     }
-
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("x").on_hover_text("Close to tray").clicked() {
                             self.hide_to_tray();
@@ -346,15 +399,11 @@ impl eframe::App for App {
                         if ui.button("-").on_hover_text("Minimise").clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                         }
-                        // draggable empty area
-                        let (rect, resp) = ui.allocate_exact_size(
-                            egui::available_size(),
-                            egui::Sense::drag(),
-                        );
+                        let (_, resp) =
+                            ui.allocate_exact_size(egui::available_size(), egui::Sense::drag());
                         if resp.dragged() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                         }
-                        let _ = rect;
                     });
                 });
                 ui.add_space(4.0);
@@ -371,18 +420,21 @@ impl eframe::App for App {
                         (Tab::Settings, "Settings"),
                     ] {
                         let sel = self.tab == t;
-                        let c = if sel { tone } else { ctx.style().visuals.weak_text_color() };
-                        let resp = ui
-                            .add(
-                                egui::Button::new(RichText::new(label).color(c).size(13.0))
-                                    .fill(if sel {
-                                        tone.gamma_multiply(0.14)
-                                    } else {
-                                        egui::Color32::TRANSPARENT
-                                    })
-                                    .corner_radius(CornerRadius::same(8))
-                                    .min_size(Vec2::new(96.0, 30.0)),
-                            );
+                        let c = if sel {
+                            tone
+                        } else {
+                            ctx.style().visuals.weak_text_color()
+                        };
+                        let resp = ui.add(
+                            egui::Button::new(RichText::new(label).color(c).size(13.0))
+                                .fill(if sel {
+                                    tone.gamma_multiply(0.14)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                })
+                                .corner_radius(CornerRadius::same(8))
+                                .min_size(Vec2::new(96.0, 30.0)),
+                        );
                         if resp.clicked() {
                             self.tab = t;
                         }
@@ -390,16 +442,14 @@ impl eframe::App for App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if self.elevated_ready {
                             pill(ui, "background task ready", true);
-                        } else {
-                            if ui.button("Finish setup").clicked() {
-                                match elevate::ensure_setup() {
-                                    Ok(true) => {
-                                        self.elevated_ready = true;
-                                        self.note("background task registered", NoteKind::Ok);
-                                    }
-                                    Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                                    Err(e) => self.note(e, NoteKind::Err),
+                        } else if ui.button("Finish setup").clicked() {
+                            match elevate::ensure_setup() {
+                                Ok(true) => {
+                                    self.elevated_ready = true;
+                                    self.note("background task registered", NoteKind::Ok);
                                 }
+                                Ok(false) => self.note("setup incomplete", NoteKind::Warn),
+                                Err(e) => self.note(e, NoteKind::Err),
                             }
                         }
                     });
@@ -411,7 +461,7 @@ impl eframe::App for App {
             .frame(egui::Frame::new().fill(ctx.style().visuals.weak_bg_color()))
             .show(ctx, |ui| match self.tab {
                 Tab::Dashboard => self.dashboard(ui),
-                Tab::Backups => self.backups(ui, ctx),
+                Tab::Backups => self.backups(ui),
                 Tab::Settings => self.settings_tab(ui),
             });
 
@@ -443,8 +493,8 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.stop_watch
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.stop_watch.store(true, Ordering::Relaxed);
+        let _ = self.settings.save();
     }
 }
 
@@ -452,7 +502,6 @@ impl App {
     fn ensure_tray(&mut self) {
         if !self.tray_alive {
             if let Some(t) = tray::build(self.settings.mode, self.on_ac, self.tx_tray.clone()) {
-                // keep it alive for the process lifetime
                 std::mem::forget(t);
                 self.tray_alive = true;
             }
@@ -464,7 +513,6 @@ impl App {
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         let on_ac = self.on_ac;
-        let (params, entries) = profile::plan(self.settings.mode, on_ac);
 
         ui.add_space(8.0);
         ui.columns(2, |cols| {
@@ -489,7 +537,9 @@ impl App {
                     });
                     ui.add_space(8.0);
                     ui.label(
-                        RichText::new(mode.blurb()).size(12.5).color(ui.visuals().weak_text_color()),
+                        RichText::new(mode.blurb())
+                            .size(12.5)
+                            .color(ui.visuals().weak_text_color()),
                     );
                     ui.add_space(10.0);
                     let p = profile::Params::for_mode(*mode, on_ac);
@@ -508,78 +558,233 @@ impl App {
                 if clicked && !selected {
                     self.settings.mode = *mode;
                     let _ = self.settings.save();
+                    self.drift_acknowledged = false;
+                    self.recheck_drift();
                 }
             }
         });
 
-        ui.add_space(14.0);
-        let apply_label = format!("Apply {}", self.settings.mode.label());
+        ui.add_space(12.0);
         ui.horizontal(|ui| {
             if ui
                 .add(
-                    egui::Button::new(RichText::new(apply_label).size(14.0).strong().color(egui::Color32::WHITE))
-                        .fill(accent(self.settings.mode, dark))
-                        .corner_radius(CornerRadius::same(10))
-                        .min_size(Vec2::new(200.0, 40.0)),
+                    egui::Button::new(
+                        RichText::new(format!("Apply {}", self.settings.mode.label()))
+                            .size(14.0)
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(accent(self.settings.mode, dark))
+                    .corner_radius(CornerRadius::same(10))
+                    .min_size(Vec2::new(190.0, 40.0)),
                 )
                 .clicked()
             {
-                let s = self.settings.clone();
-                self.submit(Job::Apply {
-                    mode: s.mode,
-                    control_fans: s.control_fans,
-                    control_gpu: s.control_gpu_limit,
-                });
+                self.apply_current_mode();
             }
-            if ui.button("Refresh").clicked() {
-                self.refresh();
+            if ui.button("Check settings").clicked() {
+                self.recheck_drift();
             }
-            ui.label(
-                RichText::new(format!("{} settings will be written", entries.len()))
-                    .size(12.0)
-                    .color(ui.visuals().weak_text_color()),
-            );
         });
 
         ui.add_space(10.0);
-        section(ui, "What is active right now");
-        let actual = power::read_all(&power::active_scheme().unwrap_or_default());
-        egui::Grid::new("active").num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
-            for e in entries.iter().take(10) {
-                let v = actual.get(&e.setting.to_ascii_lowercase());
-                ui.label(RichText::new(e.label).size(12.0));
-                ui.label(
-                    RichText::new(match v {
-                        Some(v) if v.ac == 0 => "off".into(),
-                        Some(v) => v.ac.to_string(),
-                        None => "?".into(),
-                    })
-                    .size(12.0)
-                    .monospace(),
-                );
-                ui.label(
-                    RichText::new(match v {
-                        Some(v) if v.ac != e.ac || v.dc != e.dc => {
-                            format!("expected {} / {}", e.ac, e.dc)
-                        }
-                        _ => "matches".into(),
-                    })
-                    .size(11.5)
-                    .color(ui.visuals().weak_text_color()),
-                );
-                ui.end_row();
-            }
-        });
+        self.drift_panel(ui);
 
         ui.add_space(10.0);
         section(ui, "Safety");
         self.safety_panel(ui);
     }
 
+    /// The comparison between what the mode expects and what the machine has.
+    fn drift_panel(&mut self, ui: &mut egui::Ui) {
+        let dark = ui.visuals().dark_mode;
+        let Some(report) = self.drift.clone() else {
+            return;
+        };
+
+        let drifted = report.drifted();
+        let clean = report.is_clean();
+        let managed = report.managed;
+        let acknowledged = self.drift_acknowledged;
+
+        section(ui, "Consistency check");
+
+        let (bg, tint) = if clean && managed {
+            (
+                egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.16 } else { 0.10 }),
+                egui::Color32::from_rgb(34, 160, 90),
+            )
+        } else {
+            (
+                egui::Color32::from_rgb(210, 150, 30).gamma_multiply(if dark { 0.16 } else { 0.10 }),
+                egui::Color32::from_rgb(215, 155, 35),
+            )
+        };
+
+        egui::Frame::new()
+            .fill(bg)
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(12.0)
+            .show(ui, |ui| {
+                if clean && managed {
+                    ui.label(
+                        RichText::new(format!(
+                            "All {} settings match {}.",
+                            report.total(),
+                            report.mode.label()
+                        ))
+                        .strong()
+                        .size(13.0),
+                    );
+                    ui.label(
+                        RichText::new(format!(
+                            "Active scheme: {}  •  checked just now",
+                            report.scheme_name
+                        ))
+                        .size(11.5)
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                } else {
+                    let headline = if drifted > 0 {
+                        format!(
+                            "{} of {} settings do not match {}.",
+                            drifted,
+                            report.total(),
+                            report.mode.label()
+                        )
+                    } else {
+                        "The active scheme was not created by this app.".to_string()
+                    };
+                    ui.label(RichText::new(headline).strong().size(13.0).color(tint));
+                    ui.label(
+                        RichText::new(format!("Active scheme: {}", report.scheme_name))
+                            .size(11.5)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+
+                    if drifted > 0 && !acknowledged {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("Nothing has been changed yet. What would you like?")
+                                .size(12.0),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(format!("Change to {}", report.mode.label()))
+                                            .strong()
+                                            .color(egui::Color32::WHITE),
+                                    )
+                                    .fill(tint)
+                                    .corner_radius(CornerRadius::same(8))
+                                    .min_size(Vec2::new(150.0, 32.0)),
+                                )
+                                .clicked()
+                            {
+                                self.apply_current_mode();
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new("Keep current settings")
+                                        .corner_radius(CornerRadius::same(8))
+                                        .min_size(Vec2::new(160.0, 32.0)),
+                                )
+                                .clicked()
+                            {
+                                self.drift_acknowledged = true;
+                                self.note(
+                                    "keeping the current system settings - nothing was changed",
+                                    NoteKind::Warn,
+                                );
+                            }
+                        });
+                    } else if drifted > 0 && acknowledged {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new("You chose to keep the current settings.")
+                                .size(12.0)
+                                .color(tint),
+                        );
+                        if ui.small_button("Re-check").clicked() {
+                            self.drift_acknowledged = false;
+                            self.recheck_drift();
+                        }
+                    }
+                }
+
+                ui.add_space(6.0);
+                if ui
+                    .add_enabled(
+                        drifted > 0,
+                        egui::Button::new(if self.drift_expanded {
+                            "Hide details"
+                        } else {
+                            "Show all settings"
+                        })
+                        .small(),
+                    )
+                    .clicked()
+                {
+                    self.drift_expanded = !self.drift_expanded;
+                }
+
+                if self.drift_expanded {
+                    ui.add_space(6.0);
+                    egui::Grid::new("drift")
+                        .num_columns(3)
+                        .spacing([18.0, 3.0])
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Setting").size(11.0).strong());
+                            ui.label(RichText::new("Expected").size(11.0).strong());
+                            ui.label(RichText::new("Actual").size(11.0).strong());
+                            ui.end_row();
+                            for c in &report.checks {
+                                ui.label(
+                                    RichText::new(c.label)
+                                        .size(11.5)
+                                        .color(if c.consistent {
+                                            ui.visuals().text_color()
+                                        } else {
+                                            tint
+                                        }),
+                                );
+                                ui.label(
+                                    RichText::new(drift::fmt_value(c.expected))
+                                        .size(11.5)
+                                        .monospace(),
+                                );
+                                let actual = c
+                                    .actual
+                                    .map(drift::fmt_value)
+                                    .unwrap_or_else(|| "not present".into());
+                                ui.label(
+                                    RichText::new(if c.consistent {
+                                        actual
+                                    } else {
+                                        format!("{actual}  (!)")
+                                    })
+                                    .size(11.5)
+                                    .monospace()
+                                    .color(if c.consistent {
+                                        ui.visuals().weak_text_color()
+                                    } else {
+                                        tint
+                                    }),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                }
+            });
+    }
+
     fn safety_panel(&self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         egui::Frame::new()
-            .fill(egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.16 } else { 0.10 }))
+            .fill(
+                egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.16 } else { 0.10 }),
+            )
             .corner_radius(CornerRadius::same(10))
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -589,6 +794,7 @@ impl App {
                     "disables HVCI / VBS or other security features",
                     "touches the BIOS or flashes firmware",
                     "writes undocumented EC or driver binaries",
+                    "changes a setting you asked it to keep",
                 ] {
                     ui.label(
                         RichText::new(format!("  •  {line}"))
@@ -601,12 +807,14 @@ impl App {
 
     // -------------------------------------------------------------- backups --
 
-    fn backups(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+    fn backups(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         ui.add_space(8.0);
 
         egui::Frame::new()
-            .fill(egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.15 } else { 0.10 }))
+            .fill(
+                egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.15 } else { 0.10 }),
+            )
             .corner_radius(CornerRadius::same(10))
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -635,19 +843,15 @@ impl App {
 
         ui.add_space(12.0);
 
-        // --- initial backup ------------------------------------------------
         section(ui, "Initial backup");
         ui.horizontal(|ui| {
             card(ui, false, egui::Color32::from_rgb(34, 150, 90), |ui| {
                 if self.has_factory {
                     ui.label(RichText::new("Present").strong().size(15.0));
                     ui.label(
-                        RichText::new(format!(
-                            "{} archived copies",
-                            self.archives.len()
-                        ))
-                        .size(12.0)
-                        .color(ui.visuals().weak_text_color()),
+                        RichText::new(format!("{} archived copies", self.archives.len()))
+                            .size(12.0)
+                            .color(ui.visuals().weak_text_color()),
                     );
                 } else {
                     ui.label(RichText::new("None yet").strong().size(15.0));
@@ -677,11 +881,11 @@ impl App {
             });
         });
 
-        // staged confirmation
         if self.confirm_stage > 0 {
             ui.add_space(8.0);
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(200, 120, 40).gamma_multiply(if dark { 0.14 } else { 0.10 }))
+                .fill(egui::Color32::from_rgb(200, 120, 40)
+                    .gamma_multiply(if dark { 0.14 } else { 0.10 }))
                 .corner_radius(CornerRadius::same(10))
                 .inner_margin(12.0)
                 .show(ui, |ui| match self.confirm_stage {
@@ -738,7 +942,9 @@ impl App {
                             let ok = typed.trim() == "CREATE";
                             let b = ui.add_enabled(
                                 ok,
-                                egui::Button::new(RichText::new("Create new initial backup").strong()),
+                                egui::Button::new(
+                                    RichText::new("Create new initial backup").strong(),
+                                ),
                             );
                             if b.clicked() {
                                 let note = if self.confirm_note.trim().is_empty() {
@@ -758,8 +964,6 @@ impl App {
         }
 
         ui.add_space(14.0);
-
-        // --- snapshots -----------------------------------------------------
         section(ui, &format!("Snapshots ({})", self.snapshots.len()));
         ui.horizontal(|ui| {
             if ui.button("Take a snapshot now").clicked() {
@@ -774,43 +978,44 @@ impl App {
         });
         ui.add_space(6.0);
 
-        egui::ScrollArea::vertical()
-            .max_height(300.0)
-            .show(ui, |ui| {
-                if self.snapshots.is_empty() {
+        egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+            if self.snapshots.is_empty() {
+                ui.label(
+                    RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
+                );
+            }
+            for s in self.snapshots.iter() {
+                let id = s.id.clone();
+                ui.horizontal(|ui| {
+                    let kind = match s.kind {
+                        backup::SnapshotKind::Automatic => "auto",
+                        backup::SnapshotKind::Manual => "manual",
+                    };
                     ui.label(
-                        RichText::new("No snapshots yet.")
+                        RichText::new(format!("{}  {}", s.created, s.label)).size(12.0),
+                    );
+                    ui.label(
+                        RichText::new(kind)
+                            .size(11.0)
                             .color(ui.visuals().weak_text_color()),
                     );
-                }
-                for s in self.snapshots.iter() {
-                    ui.horizontal(|ui| {
-                        let kind = match s.kind {
-                            backup::SnapshotKind::Automatic => "auto",
-                            backup::SnapshotKind::Manual => "manual",
-                        };
-                        ui.label(RichText::new(format!("{}  {}", s.created, s.label)).size(12.0));
-                        ui.label(
-                            RichText::new(kind)
-                                .size(11.0)
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.small_button("Restore").clicked() {
-                                self.submit(Job::Restore {
-                                    source: RestoreSource::Snapshot(s.id.clone()),
-                                });
-                            }
-                        });
-                        ui.separator();
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Restore").clicked() {
+                            self.submit(Job::Restore {
+                                source: RestoreSource::Snapshot(id.clone()),
+                            });
+                        }
                     });
-                }
-            });
+                    ui.separator();
+                });
+            }
+        });
 
         if !self.archives.is_empty() {
             ui.add_space(10.0);
             section(ui, "Archived initial backups");
             for a in self.archives.iter() {
+                let id = a.id.clone();
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(format!("{}  {}", a.id, a.note))
@@ -820,7 +1025,7 @@ impl App {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.small_button("Restore").clicked() {
                             self.submit(Job::Restore {
-                                source: RestoreSource::Archive(a.id.clone()),
+                                source: RestoreSource::Archive(id.clone()),
                             });
                         }
                     });
@@ -835,19 +1040,35 @@ impl App {
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         ui.add_space(8.0);
-
         let mut changed = false;
 
         section(ui, "Startup");
         card(ui, false, accent(Mode::Quiet, dark), |ui| {
-            ui.checkbox(
-                &mut self.settings.start_with_system,
-                "Start with Windows",
-            );
+            let before = self.settings.start_with_system;
+            ui.checkbox(&mut self.settings.start_with_system, "Start with Windows");
+            if before != self.settings.start_with_system {
+                changed = true;
+                // Act on it straight away rather than waiting for "Save".
+                match startup::set_self_autostart(self.settings.start_with_system) {
+                    Ok(_) => self.note(
+                        if self.settings.start_with_system {
+                            "will start with Windows"
+                        } else {
+                            "no longer starts with Windows"
+                        },
+                        NoteKind::Ok,
+                    ),
+                    Err(e) => self.note(format!("could not update start-up: {e}"), NoteKind::Err),
+                }
+            }
             ui.label(
-                RichText::new("Registers a hidden launch at sign-in so the tray icon is there.")
-                    .size(11.5)
-                    .color(ui.visuals().weak_text_color()),
+                RichText::new(
+                    "On every sign-in the app restores your last mode. Because applying is \
+                     idempotent it normally changes nothing - it just makes sure the laptop \
+                     came up the way you left it.",
+                )
+                .size(11.5)
+                .color(ui.visuals().weak_text_color()),
             );
             ui.add_space(6.0);
             ui.checkbox(
@@ -855,11 +1076,9 @@ impl App {
                 "Collapse into the tray on start",
             );
             ui.label(
-                RichText::new(
-                    "Opens straight into the notification area instead of a window.",
-                )
-                .size(11.5)
-                .color(ui.visuals().weak_text_color()),
+                RichText::new("Opens straight into the notification area instead of a window.")
+                    .size(11.5)
+                    .color(ui.visuals().weak_text_color()),
             );
         });
 
@@ -889,8 +1108,14 @@ impl App {
         section(ui, "Behaviour");
         card(ui, false, accent(Mode::Quiet, dark), |ui| {
             ui.checkbox(&mut self.settings.confirm_before_apply, "Ask before applying a mode");
-            ui.checkbox(&mut self.settings.control_fans, "Control fans through the XMG fan app");
-            ui.checkbox(&mut self.settings.control_gpu_limit, "Control the NVIDIA power limit");
+            ui.checkbox(
+                &mut self.settings.control_fans,
+                "Control fans through the XMG fan app",
+            );
+            ui.checkbox(
+                &mut self.settings.control_gpu_limit,
+                "Control the NVIDIA power limit",
+            );
         });
 
         ui.add_space(10.0);
@@ -955,20 +1180,19 @@ impl App {
 
         ui.add_space(12.0);
         ui.horizontal(|ui| {
-            if ui.button("Save settings").clicked() || changed {
-                if let Err(e) = self.settings.save() {
-                    self.note(format!("could not save settings: {e}"), NoteKind::Err);
-                }
+            let save = ui.button("Save settings").clicked();
+            if (save || changed) && self.settings.save().is_err() {
+                self.note("could not save settings", NoteKind::Err);
             }
             if ui.button("Quit").clicked() {
-                self.stop_watch
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                self.stop_watch.store(true, Ordering::Relaxed);
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
             ui.label(
                 RichText::new(format!(
-                    "elevated: {}",
-                    if sysutil::is_elevated() { "yes" } else { "no (normal)" }
+                    "elevated: {}  •  launched: {}",
+                    if sysutil::is_elevated() { "yes" } else { "no (normal)" },
+                    if self.autostarted { "by Windows" } else { "by you" }
                 ))
                 .size(11.5)
                 .color(ui.visuals().weak_text_color()),

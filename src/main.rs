@@ -8,6 +8,7 @@
 
 mod backup;
 mod config;
+mod drift;
 mod elevate;
 mod errors;
 mod fans;
@@ -68,7 +69,12 @@ fn main() {
     }
 
     // ----------------------------------------------------------------- GUI --
-    run_gui(lowered.iter().any(|a| a == "--tray"));
+    // `--autostart` marks a launch that came from the Run key, which is the
+    // signal to silently restore the saved mode.
+    run_gui(
+        lowered.iter().any(|a| a == "--tray"),
+        lowered.iter().any(|a| a == "--autostart"),
+    );
 }
 
 fn run_worker() {
@@ -166,7 +172,7 @@ a background task once so the common case never prompts."
     );
 }
 
-fn run_gui(start_hidden: bool) {
+fn run_gui(start_hidden: bool, autostarted: bool) {
     // Only one instance at a time. A second launch just reveals the first.
     let _guard = match sysutil::acquire_single_instance(MUTEX_NAME) {
         Ok(g) => g,
@@ -187,8 +193,8 @@ fn run_gui(start_hidden: bool) {
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("XMG Optimizer")
-            .with_inner_size([820.0, 680.0])
-            .with_min_inner_size([640.0, 560.0])
+            .with_inner_size([860.0, 720.0])
+            .with_min_inner_size([660.0, 580.0])
             .with_decorations(false)
             .with_resizable(true),
         ..Default::default()
@@ -201,6 +207,7 @@ fn run_gui(start_hidden: bool) {
         Box::new(move |_cc| {
             let app: Box<dyn eframe::App> = Box::new(ui::App::new(
                 settings_for_app,
+                autostarted,
                 rx_tray,
                 rx_monitor,
                 tx_tray,

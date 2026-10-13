@@ -198,8 +198,10 @@ pub fn set_self_autostart(enabled: bool) -> Result<bool, String> {
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe = exe.to_string_lossy().into_owned();
-    // --tray keeps the window hidden; the app still shows up in the tray.
-    let cmd = format!("\"{exe}\" --tray");
+    // --tray keeps the window hidden; --autostart tells the app that this
+    // particular launch came from Windows rather than from a click, which is
+    // what triggers the silent re-apply of the saved mode.
+    let cmd = format!("\"{exe}\" --tray --autostart");
     key.set_value(SELF_RUN_VALUE, &cmd).map_err(|e| e.to_string())?;
     Ok(true)
 }
@@ -209,4 +211,15 @@ pub fn self_autostart_enabled() -> bool {
         .ok()
         .and_then(|k| k.get_value::<String, _>(SELF_RUN_VALUE).ok())
         .is_some()
+}
+
+/// Brings the registry in line with the stored preference.
+///
+/// Returns `true` when a change was made, so the caller can mention it.
+pub fn reconcile_autostart(want: bool) -> bool {
+    let have = self_autostart_enabled();
+    if have == want {
+        return false;
+    }
+    matches!(set_self_autostart(want), Ok(true))
 }

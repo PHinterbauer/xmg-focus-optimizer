@@ -99,7 +99,8 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
         warnings: vec![],
     };
 
-    // A snapshot is always taken *before* anything changes.
+    // A snapshot is always taken *before* anything changes - including on a
+    // no-op re-apply, so there is always a record of the state at that moment.
     match backup::snapshot(SnapshotKind::Automatic, &format!("before-{}", mode.label().to_lowercase())) {
         Ok(s) => r.details.push(format!("Snapshot: {}", s.created)),
         Err(e) => r.warnings.push(format!("snapshot failed: {e}")),
@@ -117,6 +118,20 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
 
     let on_ac = power::on_ac_power();
     let (params, entries) = profile::plan(mode, on_ac);
+
+    // Idempotence: if the active scheme is already ours for this mode and every
+    // setting matches, leave it completely alone. This is what makes the
+    // start-up re-apply a genuine no-op rather than a rewrite.
+    let report = crate::drift::check(mode, on_ac);
+    if report.fully_applied() {
+        r.details.push(format!(
+            "Power settings already correct - nothing to change ({} of {} verified)",
+            report.total() - report.drifted(),
+            report.total()
+        ));
+        finish_apply(&mut r, mode, on_ac, params, control_fans, control_gpu);
+        return r;
+    }
 
     let base = match power::active_scheme() {
         Ok(g) => g,
@@ -159,6 +174,20 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
             .extend(mismatches.into_iter().take(4).map(|m| format!("mismatch: {m}")));
     }
 
+    finish_apply(&mut r, mode, on_ac, params, control_fans, control_gpu);
+    r
+}
+
+/// The parts of an apply that always run, whether or not the power settings
+/// needed rewriting: startup entries, GPU limit and fans.
+fn finish_apply(
+    r: &mut JobResult,
+    mode: Mode,
+    on_ac: bool,
+    params: profile::Params,
+    control_fans: bool,
+    control_gpu: bool,
+) {
     // Startup entries
     for (name, label) in startup::DISABLED {
         match startup::apply(StartupAction::Disable, name, 0) {
@@ -196,7 +225,6 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
         }
     }
 
-    // Gaming toggles are plain HKCU values, safe to set.
     r.details.push("Game DVR off, Game Mode on".into());
 
     let _ = std::fs::write(
@@ -209,10 +237,6 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
         mode.label(),
         if on_ac { "mains power" } else { "battery" }
     );
-    if !failed.is_empty() || !mismatches.is_empty() {
-        r.ok = true; // partial success is still useful, warnings are shown
-    }
-    r
 }
 
 /// Deletes only power schemes this app created before.

@@ -1,4 +1,4 @@
-# Build output
+﻿# Build output
 /target
 **/*.rs.bk
 *.pdb
@@ -12,6 +12,9 @@
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Cargo.lock IS committed on purpose: this is a binary, and a pinned
+# dependency set is what makes cargo build --locked reproducible.
 
 # Never commit real machine backups - they contain this machine's GUIDs,
 # registry values and GPU limits. Keep the folder, not its contents.

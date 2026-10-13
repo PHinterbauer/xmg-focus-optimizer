@@ -46,6 +46,10 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
 ] }
 
+[build-dependencies]
+# Locates rc.exe (MSVC) or windres (GNU) and embeds the icon + manifest.
+winresource = "0.1"
+
 [profile.release]
 opt-level     = "z"
 lto           = true

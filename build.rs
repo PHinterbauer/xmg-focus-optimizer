@@ -1,94 +1,39 @@
 // =============================================================================
-// build.rs - embeds the application icon and the Windows application manifest.
+// build.rs - embeds the application icon, the Windows manifest and version info.
 //
-// Two resource compilers are supported so the project builds both with the
-// GNU toolchain (windres ships with MinGW-w64) and with the MSVC toolchain
-// (rc.exe from the Windows SDK). If neither is available the build still
-// succeeds - the app simply falls back to a runtime-drawn icon.
+// This goes through the `winresource` crate, which locates the right resource
+// compiler for the active toolchain: `rc.exe` from the MSVC build tools, or
+// `windres` from MinGW on the GNU toolchain.
+//
+// It is worth using rather than shelling out by hand: an earlier version
+// invoked `rc` directly, and when the compiler was not on PATH the step
+// silently did nothing, producing an executable with no icon and no manifest.
+// `expect` here makes that class of mistake impossible to ship again.
 // =============================================================================
 
-use std::env;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
 fn main() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-
-    let icon = manifest_dir.join("assets").join("app.ico");
-    let manifest = manifest_dir.join("assets").join("app.manifest");
-
-    println!("cargo:rerun-if-changed={}", icon.display());
-    println!("cargo:rerun-if-changed={}", manifest.display());
+    println!("cargo:rerun-if-changed=assets/app.ico");
+    println!("cargo:rerun-if-changed=assets/app.manifest");
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Windows resource IDs used below.
-    const ID_ICON: u32 = 1;
-    const ID_MANIFEST: u32 = 24; // RT_MANIFEST
+    let mut res = winresource::WindowsResource::new();
 
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    if target_os != "windows" {
-        return;
-    }
+    res.set_icon("assets/app.ico");
+    res.set_manifest_file("assets/app.manifest");
 
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    // Shown in the file properties and in Task Manager.
+    res.set("FileDescription", "XMG Focus Optimizer");
+    res.set("ProductName", "XMG Focus Optimizer");
+    res.set("CompanyName", "XMG Focus Optimizer contributors");
+    res.set("LegalCopyright", "MIT licensed");
+    res.set("FileVersion", env!("CARGO_PKG_VERSION"));
+    res.set("ProductVersion", env!("CARGO_PKG_VERSION"));
 
-    // ------------------------------------------------------------- RC source
-    let rc = out_dir.join("xmg_resources.rc");
-    let mut body = String::new();
-    if icon.exists() {
-        body.push_str(&format!("{} ICON \"{}\"\n", ID_ICON, escape_win(&icon)));
-    }
-    if manifest.exists() {
-        body.push_str(&format!(
-            "{} {} \"{}\"\n",
-            ID_ICON,
-            ID_MANIFEST,
-            escape_win(&manifest)
-        ));
-    }
-    if body.is_empty() {
-        return;
-    }
-    if std::fs::write(&rc, body).is_err() {
-        return;
-    }
-
-    // ------------------------------------------------------ GNU: windres + ar
-    if target_env == "gnu" {
-        let obj = out_dir.join("xmg_resources.o");
-        if run("windres", &["-i", rc.to_str().unwrap(), "-O", "coff", "-o", obj.to_str().unwrap()]) {
-            let archive = out_dir.join("libxmg_resources.a");
-            if run("ar", &["crs", archive.to_str().unwrap(), obj.to_str().unwrap()]) {
-                println!("cargo:rustc-link-search=native={}", out_dir.display());
-                println!("cargo:rustc-link-lib=static=xmg_resources");
-                println!("cargo:rerun-if-env-changed=PATH");
-            }
-        }
-        return;
-    }
-
-    // ---------------------------------------------------- MSVC: rc.exe + lib
-    if target_env == "msvc" {
-        let res = out_dir.join("xmg_resources.res");
-        if run("rc", &["/nologo", "/fo", res.to_str().unwrap(), rc.to_str().unwrap()]) {
-            println!("cargo:rustc-link-search=native={}", out_dir.display());
-            println!("cargo:rustc-link-lib=static=xmg_resources");
-            // Hand the .res straight to link.exe - MSVC has no ar.
-            println!("cargo:rustc-link-arg-bins={}", res.display());
-        }
-    }
-}
-
-/// Escapes a path for use inside a quoted .rc string literal.
-fn escape_win(p: &Path) -> String {
-    p.to_string_lossy().replace('\\', "\\\\")
-}
-
-/// Runs a tool, reporting (but not failing on) a non-zero exit.
-fn run(program: &str, args: &[&str]) -> bool {
-    match Command::new(program).args(args).status() {
-        Ok(st) => st.success(),
-        Err(_) => false,
+    if let Err(e) = res.compile() {
+        panic!(
+            "could not embed the icon/manifest resources: {e}\n\
+             The executable needs these for its taskbar and Start-menu identity.\n\
+             On MSVC make sure the Visual Studio C++ build tools are installed."
+        );
     }
 }

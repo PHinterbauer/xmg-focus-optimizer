@@ -17,7 +17,7 @@ struct Rgba {
 fn mode_colors(mode: Mode) -> ([u8; 3], [u8; 3]) {
     match mode {
         // deep indigo blue -> sky
-        Mode::Quiet => ([30, 64, 175], [14, 182, 225]),
+        Mode::Quiet => ([20, 34, 116], [0, 196, 232]),
         // deep amber -> warm orange
         Mode::Performance => ([176, 58, 12], [249, 168, 37]),
     }
@@ -27,9 +27,9 @@ fn mode_colors(mode: Mode) -> ([u8; 3], [u8; 3]) {
 fn draw(size: u32, mode: Mode) -> Rgba {
     let (c0, c1) = mode_colors(mode);
     let s = size as f32;
-    let pad = s * 0.075;
+    let pad = s * 0.078;
     let w = s - pad * 2.0;
-    let rad = (w * 0.30).max(0.001);
+    let rad = (w / 2.0).max(0.001);
     let cx = pad + w / 2.0;
     let cy = pad + w / 2.0;
 
@@ -61,8 +61,8 @@ fn draw(size: u32, mode: Mode) -> Rgba {
     }
 
     // --- power glyph ------------------------------------------------------
-    let rr = w * 0.205;
-    let sw = (w * 0.075).max(1.0);
+    let rr = w * 0.212;
+    let sw = (w * 0.082).max(1.0);
 
     // ring: 284 degrees starting at -52, leaving a gap at the top
     let steps = (size as usize * 8).clamp(180, 1200);
@@ -74,8 +74,8 @@ fn draw(size: u32, mode: Mode) -> Rgba {
     }
 
     // stem, from just above the centre up through the gap
-    let top = cy - rr * 1.12;
-    let bot = cy + rr * 0.10;
+    let top = cy - rr * 1.16;
+    let bot = cy + rr * 0.14;
     let mut y = top;
     while y <= bot {
         disc(&mut px, size, cx, y, sw / 2.0);

@@ -1,14 +1,20 @@
 <div align="center">
 
+<img src="assets/icon.png" width="128" alt="XMG Focus Optimizer icon">
+
 # XMG Focus Optimizer
 
 **Two safe performance modes for the SCHENKER XMG FOCUS 15.**
-Native Windows app, written in Rust. No PowerShell, no console window.
+A native Windows app, written in Rust.
 
 `Quiet` for cool and quiet · `Performance` for full speed · both adapt when you unplug
 
 [![Build](https://github.com/PHinterbauer/xmg-focus-optimizer/actions/workflows/build.yml/badge.svg)](https://github.com/PHinterbauer/xmg-focus-optimizer/actions/workflows/build.yml)
+[![Tests](https://img.shields.io/badge/tests-26%20passing-22a06b)](src/tests.rs)
+[![Release](https://img.shields.io/github/v/release/PHinterbauer/xmg-focus-optimizer?label=release)](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+[**⬇ Download**](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest) · [**Report an issue**](https://github.com/PHinterbauer/xmg-focus-optimizer/issues)
 
 </div>
 
@@ -16,9 +22,9 @@ Native Windows app, written in Rust. No PowerShell, no console window.
 
 ## What it does
 
-| | |
-|---|---|
-| **Quiet** | CPU capped at 70%, Windows biased toward the integrated GPU, RTX throttled to 25 W, fans quiet |
+| Mode | Behaviour |
+|:--|:--|
+| **Quiet** | CPU capped at 70%, Windows biased toward the integrated GPU, RTX throttled to 25 W, fans kept quiet |
 | **Performance** | Full boost, every power saving dropped, GPU at its 85 W maximum, fans on turbo |
 | **Automatic** | Unplug the charger and the battery values are applied. Plug it back in and mains returns. |
 | **Persistent** | Re-launches at sign-in and quietly restores whichever mode you had selected. |
@@ -27,7 +33,7 @@ Verified across all four mains/battery combinations on the target machine.
 
 ---
 
-## Safety is the design
+## 🛡 Safety is the design
 
 Every change this app makes is reversible, and a way back exists **before** each one.
 
@@ -53,7 +59,7 @@ is sent, so a faulty driver reading cannot push the hardware past what it suppor
 
 ---
 
-## Backups can only be added, never removed
+## 💾 Backups can only be added, never removed
 
 ```
 XMG-Backup/
@@ -79,7 +85,7 @@ replaced, so upgrading never starts from a blank slate.
 
 ---
 
-## Consistency check
+## 🔍 Consistency check
 
 The Dashboard compares **all 16 settings** against what the selected mode should produce for the
 current power source. When something disagrees, the app changes nothing until you choose:
@@ -100,19 +106,22 @@ the scheme.
 
 ---
 
-## Install
+## 📦 Install
 
-1. Download `XMG-Optimizer.exe` from the Actions artefacts or Releases.
+1. Download `XMG-Optimizer.exe` from the [latest release](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest).
 2. Right-click → **Run as administrator**. This one elevated run registers a background task.
 3. Accept the prompt. From then on, applying a mode needs **no** further prompts.
 
+> [!TIP]
+> Closing the window collapses it into the notification area, so the background watcher keeps
+> reacting when you unplug. Quit from the tray menu or the Settings tab.
+
+> [!NOTE]
 > If Smart App Control refuses a freshly built unsigned binary, add the folder under
-> Windows Security → App & browser control → Exclusions.
+> Windows Security → App & browser control → **Exclusions**.
 
-Closing the window collapses it into the notification area so the background watcher keeps running.
-Quit from the tray menu or the Settings tab.
-
-### Command line
+<details>
+<summary><b>Command line reference</b></summary>
 
 ```
 XMG-Optimizer.exe                     open the window
@@ -126,29 +135,39 @@ XMG-Optimizer.exe factory             archive the current backup, make a new ini
 XMG-Optimizer.exe help
 ```
 
----
-
-## Files
-
-| Purpose | Location |
-|---|---|
-| Backups, snapshots, archive | next to the executable, in `XMG-Backup\` |
-| Settings and logs | `%LOCALAPPDATA%\XMG-Optimizer\` |
+</details>
 
 ---
 
-## Build from source
+## ⚙️ Build from source
 
 ```sh
 cargo build --release
 ```
 
 Needs the MSVC toolchain, for `rc.exe`, which embeds the icon and manifest. The build also works
-with the GNU toolchain using MinGW's `windres`. CI runs on every push.
+with the GNU toolchain using MinGW's `windres`.
+
+CI runs `cargo check`, the unit tests, `clippy` and a release build on every push, and attaches the
+executable as an artefact.
+
+<details>
+<summary><b>What the tests cover</b></summary>
+
+`src/tests.rs` — 26 tests over the parts that must never silently go wrong:
+
+- Quiet is strictly more conservative than Performance, on every axis
+- Battery is never more aggressive than mains
+- All 16 GUIDs are well formed and unique; the two fixed pairs keep their AC/DC split
+- Backup parsing rejects traversal, non-numeric and malformed-GUID input
+- Restore sources refuse `../` style path escapes
+- The AC/DC tolerance that stops false drift warnings
+
+</details>
 
 ---
 
-## Known limitation
+## ⚠️ Known limitation
 
 The RTX 3050 Ti idles in performance state P0 — roughly 16 W instead of 0.5 W. This is a driver
 profile held in an undocumented binary, so it is **not** automated. Change it by hand in
@@ -157,7 +176,16 @@ performance**.
 
 ---
 
-## Credits
+## 📁 Where files live
+
+| Purpose | Location |
+|:--|:--|
+| Backups, snapshots, archive | next to the executable, in `XMG-Backup\` |
+| Settings and logs | `%LOCALAPPDATA%\XMG-Optimizer\` |
+
+---
+
+## 🙏 Credits
 
 The power-setting GUIDs and both mode profiles were established empirically against the target
 machine with `powercfg /qh`, then verified across all four mains/battery combinations.

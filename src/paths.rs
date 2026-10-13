@@ -121,9 +121,9 @@ fn known_folder_documents() -> Option<PathBuf> {
         unsafe {
             let mut ptr: *mut PWSTR = std::ptr::null_mut();
             let hr = SHGetKnownFolderPath(
-                windows::core::GUID::from_u128(0xfdd39ad0_238f_46af_adb4_6c85480369c7),
+                &windows::core::GUID::from_u128(0xfdd39ad0_238f_46af_adb4_6c85480369c7),
                 Default::default(),
-                windows::Win32::Foundation::HANDLE(0),
+                None,
             );
             if hr.is_ok() && !ptr.is_null() {
                 let text = windows::core::PCWSTR((*ptr).0).to_string().unwrap_or_default();

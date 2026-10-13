@@ -1,4 +1,4 @@
-//! The window.
+﻿//! The window.
 //!
 //! egui 0.36 splits the app entry point into two:
 //!
@@ -75,7 +75,7 @@ pub struct App {
     confirm_note: String,
 
     theme_applied: Option<Theme>,
-    tray_alive: bool,
+    tray: Option<tray::Tray>,
     autostarted: bool,
     /// Theme value pushed to egui, so it is only pushed when it changes.
     style_pushed: bool,
@@ -121,7 +121,7 @@ impl App {
             confirm_stage: 0,
             confirm_note: String::new(),
             theme_applied: None,
-            tray_alive: false,
+            tray: None,
             autostarted,
             style_pushed: false,
             tray_rx,
@@ -246,14 +246,26 @@ impl App {
     }
 
     fn ensure_tray(&mut self) {
-        if !self.tray_alive {
-            if let Some(t) = tray::build(self.settings.mode, self.on_ac, self.tx_tray.clone()) {
-                std::mem::forget(t);
-                self.tray_alive = true;
-            }
+        if self.tray.is_none() {
+            self.tray = tray::build(self.settings.mode, self.on_ac);
         }
     }
 
+    /// Drains the tray menu into the command channel.
+    ///
+    /// muda menu items are Rc-based and cannot be moved onto another thread, so
+    /// the menu is pumped from here - and logic() keeps running even while the
+    /// window is hidden, which is exactly when the tray matters most.
+    fn poll_tray(&self) {
+        let Some(tray) = self.tray.as_ref() else {
+            return;
+        };
+        for cmd in tray.poll() {
+            if self.tx_tray.send(cmd).is_err() {
+                break;
+            }
+        }
+    }
     /// Drains both channels. Runs whether or not the window is visible.
     fn poll_events(&mut self) {
         while let Ok(cmd) = self.tray_rx.try_recv() {
@@ -263,6 +275,9 @@ impl App {
                     if self.settings.mode != m {
                         self.settings.mode = m;
                         let _ = self.settings.save();
+                        if let Some(tray) = self.tray.as_ref() {
+                            tray.set_mode(m);
+                        }
                         self.drift_acknowledged = false;
                         self.apply_current_mode();
                     }
@@ -307,8 +322,9 @@ impl App {
 impl eframe::App for App {
     /// Runs even when the window is hidden - the background watcher lives here.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_events();
         self.ensure_tray();
+        self.poll_tray();
+        self.poll_events();
         // Something changed in the background; make sure a visible window repaints.
         ctx.request_repaint();
     }
@@ -569,7 +585,7 @@ impl App {
                     let p = profile::Params::for_mode(*mode, on_ac);
                     ui.label(
                         RichText::new(format!(
-                            "CPU cap {}%   â€¢   efficiency {}   â€¢   GPU {} W\nFans {}   â€¢   noiseless {}",
+                            "CPU cap {}%   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢   efficiency {}   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢   GPU {} W\nFans {}   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢   noiseless {}",
                             p.cpu_max,
                             p.epp,
                             p.gpu_watts,
@@ -583,6 +599,9 @@ impl App {
                     self.settings.mode = *mode;
                     let _ = self.settings.save();
                     self.drift_acknowledged = false;
+                    if let Some(tray) = self.tray.as_ref() {
+                        tray.set_mode(*mode);
+                    }
                     self.recheck_drift();
                 }
             }
@@ -662,7 +681,7 @@ impl App {
                     );
                     ui.label(
                         RichText::new(format!(
-                            "Active scheme: {}  â€¢  checked just now",
+                            "Active scheme: {}  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢  checked just now",
                             report.scheme_name
                         ))
                         .size(11.5)
@@ -815,7 +834,7 @@ impl App {
                     "changes a setting you asked it to keep",
                 ] {
                     ui.label(
-                        RichText::new(format!("  â€¢  {line}"))
+                        RichText::new(format!("  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢  {line}"))
                             .size(12.0)
                             .color(ui.visuals().weak_text_color()),
                     );
@@ -1216,7 +1235,7 @@ impl App {
             }
             ui.label(
                 RichText::new(format!(
-                    "elevated: {}  â€¢  launched: {}",
+                    "elevated: {}  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢  launched: {}",
                     if sysutil::is_elevated() { "yes" } else { "no (normal)" },
                     if self.autostarted { "by Windows" } else { "by you" }
                 ))

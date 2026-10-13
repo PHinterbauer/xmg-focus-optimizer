@@ -14,17 +14,17 @@ env:
 
 jobs:
   check:
-    name: Check
+    name: Check & test
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
       - name: Type check
-        run: cargo check --release
+        run: cargo check --release --all-targets
+      - name: Unit tests
+        run: cargo test --release -- --nocapture
       - name: Clippy
-        run: cargo clippy --release
+        run: cargo clippy --release --all-targets
       - name: Formatting
         continue-on-error: true
         run: cargo fmt
@@ -50,4 +50,4 @@ jobs:
           name: XMG-Optimizer-windows
           path: dist/XMG-Optimizer.exe
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

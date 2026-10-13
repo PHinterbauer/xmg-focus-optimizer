@@ -1,6 +1,10 @@
 ﻿//! Notification-area icon and its menu.
-
-use std::sync::mpsc::Sender;
+//!
+//! `muda` menu items are built on `Rc` and are therefore neither `Send` nor
+//! `Sync`, so they cannot be moved onto a helper thread. Instead the menu is
+//! polled from the main loop via [`Tray::poll`], which the app calls from
+//! `eframe::App::logic` - that hook keeps running while the window is hidden,
+//! so the tray stays fully functional in the background.
 
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::TrayIcon;
@@ -17,67 +21,92 @@ pub enum TrayCommand {
     Quit,
 }
 
+/// A live tray icon plus the menu items it dispatches from.
 pub struct Tray {
-    _icon: TrayIcon,
+    icon: TrayIcon,
+    show: MenuItem,
+    quiet: MenuItem,
+    performance: MenuItem,
+    restore: MenuItem,
+    quit: MenuItem,
 }
 
-pub fn build(mode: Mode, on_ac: bool, tx: Sender<TrayCommand>) -> Option<Tray> {
+impl Tray {
+    /// Non-blocking menu pump. Returns every command raised since last time.
+    pub fn poll(&self) -> Vec<TrayCommand> {
+        let mut out = Vec::new();
+        // Drain the global receiver; it is shared by every tray instance, so
+        // unknown ids are simply ignored rather than treated as errors.
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            let id = event.id;
+            if id == self.show.id() {
+                out.push(TrayCommand::Show);
+            } else if id == self.quiet.id() {
+                out.push(TrayCommand::Apply(Mode::Quiet));
+            } else if id == self.performance.id() {
+                out.push(TrayCommand::Apply(Mode::Performance));
+            } else if id == self.restore.id() {
+                out.push(TrayCommand::Restore);
+            } else if id == self.quit.id() {
+                out.push(TrayCommand::Quit);
+            }
+        }
+        out
+    }
+
+    /// Refreshes the icon and tooltip to reflect the current mode.
+    pub fn set_mode(&self, mode: Mode) {
+        if let Some(i) = icon::tray_icon(mode) {
+            self.icon.set_icon(Some(i));
+        }
+        self.icon
+            .set_tooltip(Some(format!("XMG Optimizer - {}", mode.label())));
+    }
+}
+
+/// Builds the tray icon. `None` when the notification area is unavailable.
+pub fn build(mode: Mode, on_ac: bool) -> Option<Tray> {
     let menu = Menu::new();
 
-    let head = MenuItem::new(format!(
-        "XMG Optimizer - {} ({})",
-        mode.label(),
-        if on_ac { "mains" } else { "battery" }
-    ), true, None);
+    let head = MenuItem::new(
+        format!(
+            "XMG Optimizer - {} ({})",
+            mode.label(),
+            if on_ac { "mains" } else { "battery" }
+        ),
+        false,
+        None,
+    );
     let show = MenuItem::new("Open", true, None);
     let quiet = MenuItem::new("Apply Quiet", true, None);
-    let perf = MenuItem::new("Apply Performance", true, None);
+    let performance = MenuItem::new("Apply Performance", true, None);
     let restore = MenuItem::new("Restore settings...", true, None);
-    let sep = PredefinedMenuItem::separator();
     let quit = MenuItem::new("Quit", true, None);
 
     menu.append(&head).ok()?;
-    menu.append(&sep).ok()?;
+    menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&show).ok()?;
     menu.append(&quiet).ok()?;
-    menu.append(&perf).ok()?;
+    menu.append(&performance).ok()?;
     menu.append(&restore).ok()?;
     menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
 
-    let builder = TrayIconBuilder::new()
+    let icon_handle = icon::tray_icon(mode)?;
+
+    let built = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip(format!("XMG Optimizer - {}", mode.label()))
-        .with_icon(icon::tray_icon(mode)?);
+        .with_icon(icon_handle)
+        .build()
+        .ok()?;
 
-    let tray = builder.build().ok()?;
-
-    // Route menu clicks back to the app.
-    std::thread::spawn(move || loop {
-        if let Ok(event) = MenuEvent::receiver().recv() {
-            let cmd = match event.id.as_ref() {
-                id if id == show.id().as_ref() => Some(TrayCommand::Show),
-                id if id == quiet.id().as_ref() => Some(TrayCommand::Apply(Mode::Quiet)),
-                id if id == perf.id().as_ref() => Some(TrayCommand::Apply(Mode::Performance)),
-                id if id == restore.id().as_ref() => Some(TrayCommand::Restore),
-                id if id == quit.id().as_ref() => Some(TrayCommand::Quit),
-                _ => None,
-            };
-            if let Some(c) = cmd {
-                if tx.send(c).is_err() {
-                    break;
-                }
-            }
-        }
-    });
-
-    Some(Tray { _icon: tray })
-}
-
-/// Swaps the tray icon to reflect the active mode.
-pub fn set_mode(tray: &TrayIcon, mode: Mode) {
-    if let Some(i) = icon::tray_icon(mode) {
-        tray.set_icon(Some(i));
-    }
-    tray.set_tooltip(Some(format!("XMG Optimizer - {}", mode.label())));
+    Some(Tray {
+        icon: built,
+        show,
+        quiet,
+        performance,
+        restore,
+        quit,
+    })
 }

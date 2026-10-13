@@ -1,4 +1,4 @@
-//! Background watcher: notices the charger being plugged in or pulled out and
+﻿//! Background watcher: notices the charger being plugged in or pulled out and
 //! re-applies the matching settings without the user touching anything.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::config::Settings;
-use crate::jobs::{self, Job};
+use crate::elevate;
+use crate::jobs::Job;
 use crate::profile::Mode;
 use crate::sysutil;
 
@@ -52,7 +53,7 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
                     continue;
                 }
 
-                jobs::submit(Job::Apply {
+                elevate::submit(Job::Apply {
                     mode: live.mode,
                     control_fans: live.control_fans,
                     control_gpu: live.control_gpu_limit,

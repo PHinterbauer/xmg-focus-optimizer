@@ -1,4 +1,4 @@
-//! Getting elevated work done without a UAC prompt on every click.
+﻿//! Getting elevated work done without a UAC prompt on every click.
 //!
 //! After the one-time setup there is a scheduled task registered with "highest
 //! privileges". The GUI drops a job file and asks the task to run, so applying
@@ -99,8 +99,8 @@ pub fn elevate_directly() -> bool {
             None,
             SW_HIDE,
         );
-        // ShellExecuteW returns > 32 on success.
-        r.0 > 32
+        // ShellExecuteW returns a handle; anything above 32 means success.
+        (r as isize) > 32
     }
     #[cfg(not(windows))]
     {
@@ -149,7 +149,7 @@ pub fn ensure_setup() -> Result<bool, String> {
             None,
             SW_HIDE,
         );
-        if r.0 > 32 {
+        if (r as isize) > 32 {
             // Give the elevated process a moment to create the task.
             for _ in 0..20 {
                 if task_exists() {

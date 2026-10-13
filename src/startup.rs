@@ -1,4 +1,4 @@
-//! Startup entries: disabling background apps and delaying the ones that must
+﻿//! Startup entries: disabling background apps and delaying the ones that must
 //! keep running.
 //!
 //! LG HUB and OneDrive are never disabled - they are only started a little
@@ -45,9 +45,13 @@ pub fn read_value(name: &str) -> Option<String> {
 pub fn list_all() -> Vec<(String, String)> {
     let mut out = Vec::new();
     let Ok(k) = open_run(false) else { return out };
-    for name in k.enum_values().flatten() {
-        if let Ok(v) = k.get_value::<String, _>(&name) {
+    // `enum_values` yields (name, RegValue) pairs; we only keep REG_SZ ones.
+    for entry in k.enum_values().flatten() {
+        let (name, value) = entry;
+        if let Ok(v) = k.get_value::<String, _>(name.as_str()) {
             out.push((name, v));
+        } else {
+            let _ = value;
         }
     }
     out.sort();
@@ -94,7 +98,7 @@ pub fn restore_autostart(base: &Path) -> (usize, Vec<String>) {
             skipped.push(format!("{name} (empty value)"));
             continue;
         }
-        match key.set_value(name, value) {
+        match key.set_value(name, &value) {
             Ok(()) => ok += 1,
             Err(_) => skipped.push(name.to_string()),
         }

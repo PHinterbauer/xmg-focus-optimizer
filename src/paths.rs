@@ -1,4 +1,4 @@
-//! Where everything lives on disk.
+﻿//! Where everything lives on disk.
 //!
 //! The most important rule in this whole program: **a backup directory is never
 //! deleted, emptied or overwritten in place.** New "initial" backups are always
@@ -126,7 +126,7 @@ fn known_folder_documents() -> Option<PathBuf> {
                 windows::Win32::Foundation::HANDLE(0),
             );
             if hr.is_ok() && !ptr.is_null() {
-                let text = windows::core::PCWSTR(ptr.0).to_string().unwrap_or_default();
+                let text = windows::core::PCWSTR((*ptr).0).to_string().unwrap_or_default();
                 let _ = CoTaskMemFree(Some(ptr.cast()));
                 if !text.is_empty() {
                     return Some(PathBuf::from(text));

@@ -1,6 +1,6 @@
-//! XMG Focus Optimizer
+﻿//! XMG Focus Optimizer
 //!
-//! Two safe performance modes for the SCHENKER XMG FOCUS 14 (Mid 2021).
+//! Two safe performance modes for the SCHENKER XMG FOCUS 15.
 //!
 //! Modes:      `quiet` | `performance`
 //! Commands:   `apply`, `restore`, `snapshot`, `factory`, `help`
@@ -26,7 +26,6 @@ mod ui;
 mod worker;
 
 use std::sync::mpsc::channel;
-use std::sync::Arc;
 
 use config::Settings;
 use jobs::Job;

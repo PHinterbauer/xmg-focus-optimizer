@@ -1,4 +1,4 @@
-//! Notification-area icon and its menu.
+﻿//! Notification-area icon and its menu.
 
 use std::sync::mpsc::Sender;
 
@@ -48,7 +48,7 @@ pub fn build(mode: Mode, on_ac: bool, tx: Sender<TrayCommand>) -> Option<Tray> {
     let builder = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip(format!("XMG Optimizer - {}", mode.label()))
-        .with_icon(icon::load(mode));
+        .with_icon(icon::tray_icon(mode)?);
 
     let tray = builder.build().ok()?;
 
@@ -76,6 +76,8 @@ pub fn build(mode: Mode, on_ac: bool, tx: Sender<TrayCommand>) -> Option<Tray> {
 
 /// Swaps the tray icon to reflect the active mode.
 pub fn set_mode(tray: &TrayIcon, mode: Mode) {
-    tray.set_icon(Some(icon::load(mode)));
+    if let Some(i) = icon::tray_icon(mode) {
+        tray.set_icon(Some(i));
+    }
     tray.set_tooltip(Some(format!("XMG Optimizer - {}", mode.label())));
 }

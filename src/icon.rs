@@ -4,8 +4,6 @@
 //! A squircle plate with a power glyph. Quiet is calm blue, Performance is warm
 //! amber - so the mode is readable at a glance even from a 16 px tray icon.
 
-use std::sync::OnceLock;
-
 use crate::profile::Mode;
 
 // ------------------------------------------------------------- geometry ---
@@ -52,7 +50,6 @@ fn draw(size: u32, mode: Mode) -> Rgba {
             if q > 1.06 {
                 continue;
             }
-            // antialias across the last little band
             let a = ((1.06 - q) / 0.06).clamp(0.0, 1.0);
             let t = ((fx - pad) + (fy - pad)) / (2.0 * w);
             let i = ((y * size + x) * 4) as usize;
@@ -85,7 +82,6 @@ fn draw(size: u32, mode: Mode) -> Rgba {
         y += 0.4;
     }
 
-    // The glyph was composited opaquely white on top of whatever was there.
     Rgba { w: size, h: size, px }
 }
 
@@ -99,7 +95,8 @@ fn disc(px: &mut [u8], size: u32, cx: f32, cy: f32, r: f32) {
             if x < 0 || y < 0 || x >= size as i32 || y >= size as i32 {
                 continue;
             }
-            let d = (((x as f32 - cx) * (x as f32 - cx) + (y as f32 - cy) * (y as f32 - cy)).sqrt())
+            let d = (((x as f32 - cx) * (x as f32 - cx) + (y as f32 - cy) * (y as f32 - cy))
+                .sqrt())
                 - r;
             let a = (0.5 - d).clamp(0.0, 1.0);
             if a <= 0.0 {
@@ -120,18 +117,23 @@ fn lerp(a: u8, b: u8, t: f32) -> u8 {
 }
 
 // ---------------------------------------------------------------- caching --
+//
+// Only the plain pixel data is cached globally. `tray_icon::Icon` wraps a raw
+// pointer and is deliberately neither Send nor Sync, so it can never live in a
+// `static`; it is rebuilt on demand instead, which costs nothing at this size.
 
-static QUIET_RGBA: OnceLock<Vec<u8>> = OnceLock::new();
-static PERF_RGBA: OnceLock<Vec<u8>> = OnceLock::new();
-static QUIET_TEX: OnceLock<egui::TextureHandle> = OnceLock::new();
-static PERF_TEX: OnceLock<egui::TextureHandle> = OnceLock::new();
-static QUIET_ICON: OnceLock<tray_icon::Icon> = OnceLock::new();
-static PERF_ICON: OnceLock<tray_icon::Icon> = OnceLock::new();
+const ICON_PX: usize = 64;
 
-fn rgba_for(mode: Mode) -> &'static Vec<u8> {
+static QUIET_RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static PERF_RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static QUIET_TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
+static PERF_TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
+
+/// Straight RGBA pixels for the icon, rendered once per mode.
+pub fn rgba_for(mode: Mode) -> &'static [u8] {
     match mode {
-        Mode::Quiet => QUIET_RGBA.get_or_init(|| draw(64, mode).px),
-        Mode::Performance => PERF_RGBA.get_or_init(|| draw(64, mode).px),
+        Mode::Quiet => QUIET_RGBA.get_or_init(|| draw(ICON_PX as u32, mode).px),
+        Mode::Performance => PERF_RGBA.get_or_init(|| draw(ICON_PX as u32, mode).px),
     }
 }
 
@@ -140,15 +142,19 @@ pub fn texture(ctx: &egui::Context, mode: Mode) -> egui::TextureHandle {
     match mode {
         Mode::Quiet => QUIET_TEX
             .get_or_init(|| {
-                let px = rgba_for(mode);
-                let img = egui::ColorImage::from_rgba_unmultiplied([64, 64], px);
+                let img = egui::ColorImage::from_rgba_unmultiplied(
+                    [ICON_PX, ICON_PX],
+                    rgba_for(mode),
+                );
                 ctx.load_texture("icon-quiet", img, egui::TextureOptions::LINEAR)
             })
             .clone(),
         Mode::Performance => PERF_TEX
             .get_or_init(|| {
-                let px = rgba_for(mode);
-                let img = egui::ColorImage::from_rgba_unmultiplied([64, 64], px);
+                let img = egui::ColorImage::from_rgba_unmultiplied(
+                    [ICON_PX, ICON_PX],
+                    rgba_for(mode),
+                );
                 ctx.load_texture("icon-perf", img, egui::TextureOptions::LINEAR)
             })
             .clone(),
@@ -156,24 +162,19 @@ pub fn texture(ctx: &egui::Context, mode: Mode) -> egui::TextureHandle {
 }
 
 /// Windows icon handle for the tray.
-pub fn load(mode: Mode) -> tray_icon::Icon {
-    match mode {
-        Mode::Quiet => QUIET_ICON
-            .get_or_init(|| {
-                let px = rgba_for(mode);
-                tray_icon::Icon::from_rgba(64, 64, px.clone())
-            })
-            .clone(),
-        Mode::Performance => PERF_ICON
-            .get_or_init(|| {
-                let px = rgba_for(mode);
-                tray_icon::Icon::from_rgba(64, 64, px.clone())
-            })
-            .clone(),
-    }
+///
+/// `None` only when the pixel data is rejected, which would indicate a bug in
+/// the drawing code rather than anything environmental.
+pub fn tray_icon(mode: Mode) -> Option<tray_icon::Icon> {
+    tray_icon::Icon::from_rgba(
+        rgba_for(mode).to_vec(),
+        ICON_PX as u32,
+        ICON_PX as u32,
+    )
+    .ok()
 }
 
-/// Human-readable description of the icon colours, used in the About area.
+/// Human-readable description of the icon colours.
 pub fn describe(mode: Mode) -> &'static str {
     match mode {
         Mode::Quiet => "calm blue",

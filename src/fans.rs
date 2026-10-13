@@ -1,4 +1,4 @@
-//! Fan control through the manufacturer's own "Fan Speed Setting" app.
+﻿//! Fan control through the manufacturer's own "Fan Speed Setting" app.
 //!
 //! # Why UI Automation
 //!
@@ -239,12 +239,14 @@ pub fn read_rpm() -> Option<(String, String)> {
 fn find_app_window() -> Option<HWND> {
     let class_w: Vec<u16> = crate::sysutil::wide(APP_WINDOW_CLASS);
     unsafe {
-        let h = FindWindowW(
+        // FindWindowW reports "not found" as an Err, and IsWindow takes Option.
+        if let Ok(h) = FindWindowW(
             windows::core::PCWSTR(class_w.as_ptr()),
             windows::core::PCWSTR::null(),
-        );
-        if !h.is_invalid() && IsWindow(h).as_bool() {
-            return Some(h);
+        ) {
+            if !h.is_invalid() && IsWindow(Some(h)).as_bool() {
+                return Some(h);
+            }
         }
     }
     None

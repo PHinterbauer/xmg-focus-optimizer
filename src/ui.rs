@@ -1,14 +1,18 @@
 //! The window.
 //!
-//! Frameless with custom title-bar controls, so "close" can mean "collapse into
-//! the tray" rather than "quit" - which is what keeps the power watcher alive.
+//! egui 0.36 splits the app entry point into two:
+//!
+//! * [`eframe::App::logic`] runs even while the window is **hidden**, which is
+//!   exactly what this app needs - the tray watcher keeps reacting to the
+//!   charger being pulled while there is no window on screen.
+//! * [`eframe::App::ui`] paints the window when it is visible.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
-use egui::{Align, CornerRadius, Layout, RichText, Stroke, Vec2};
+use egui::{Align, CornerRadius, Layout, Margin, RichText, Stroke, Vec2};
 
 use crate::backup::{self, ArchiveEntry, RestoreSource, SnapshotInfo};
 use crate::config::{Settings, Theme};
@@ -17,7 +21,6 @@ use crate::elevate;
 use crate::icon;
 use crate::jobs::{self, Job, JobResult};
 use crate::monitor::MonitorEvent;
-use crate::power;
 use crate::profile::{self, Mode};
 use crate::startup;
 use crate::sysutil;
@@ -70,6 +73,8 @@ pub struct App {
     theme_applied: Option<Theme>,
     tray_alive: bool,
     autostarted: bool,
+    /// Theme value pushed to egui, so it is only pushed when it changes.
+    style_pushed: bool,
 
     tray_rx: Receiver<TrayCommand>,
     monitor_rx: Receiver<MonitorEvent>,
@@ -90,7 +95,7 @@ impl App {
         stop_watch: Arc<AtomicBool>,
         start_hidden: bool,
     ) -> Self {
-        let on_ac = power::on_ac_power();
+        let on_ac = crate::power::on_ac_power();
         let (snapshots, archives, backup_dir, has_factory) = Self::state().unwrap_or_default();
 
         let mut app = App {
@@ -112,6 +117,7 @@ impl App {
             theme_applied: None,
             tray_alive: false,
             autostarted,
+            style_pushed: false,
             tray_rx,
             monitor_rx,
             tx_tray,
@@ -124,19 +130,16 @@ impl App {
         }
         app.refresh();
         app.reconcile_autostart();
+        app.recheck_drift();
 
         // Launched by Windows: silently put the saved mode back in place.
-        // Because applying is idempotent this normally changes nothing at all -
-        // it just guarantees the laptop came up the way the user left it.
+        // Because applying is idempotent this normally changes nothing at all.
         if autostarted {
-            app.recheck_drift();
             app.submit_now(Job::Apply {
                 mode: app.settings.mode,
                 control_fans: app.settings.control_fans,
                 control_gpu: app.settings.control_gpu_limit,
             });
-        } else {
-            app.recheck_drift();
         }
         app
     }
@@ -156,10 +159,9 @@ impl App {
             self.backup_dir = d;
             self.has_factory = h;
         }
-        self.on_ac = power::on_ac_power();
+        self.on_ac = crate::power::on_ac_power();
     }
 
-    /// Makes the registry agree with the stored preference.
     fn reconcile_autostart(&mut self) {
         if startup::reconcile_autostart(self.settings.start_with_system) {
             self.note(
@@ -177,12 +179,11 @@ impl App {
         self.drift = Some(drift::check(self.settings.mode, self.on_ac));
     }
 
-    fn hide_to_tray(&mut self) {
-        egui::Context::current()
-            .send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    fn hide_to_tray(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
-    fn show_window(&mut self, ctx: &egui::Context) {
+    fn show_window(&self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -213,7 +214,6 @@ impl App {
         self.recheck_drift();
     }
 
-    /// Submits a job, bypassing the busy guard (used for the start-up re-apply).
     fn submit_now(&mut self, job: Job) {
         self.busy = true;
         elevate::submit(job);
@@ -236,8 +236,16 @@ impl App {
         });
     }
 
-    // ------------------------------------------------------------- events --
+    fn ensure_tray(&mut self) {
+        if !self.tray_alive {
+            if let Some(t) = tray::build(self.settings.mode, self.on_ac, self.tx_tray.clone()) {
+                std::mem::forget(t);
+                self.tray_alive = true;
+            }
+        }
+    }
 
+    /// Drains both channels. Runs whether or not the window is visible.
     fn poll_events(&mut self, ctx: &egui::Context) {
         while let Ok(cmd) = self.tray_rx.try_recv() {
             match cmd {
@@ -261,21 +269,21 @@ impl App {
             }
         }
 
-        while let Ok(ev) = self.monitor_rx.try_recv() {
-            if let MonitorEvent::PowerChanged { on_ac, mode, triggered } = ev {
-                self.on_ac = on_ac;
-                if triggered {
-                    self.note(
-                        format!(
-                            "power source changed to {} - re-applied {mode}",
-                            if on_ac { "mains" } else { "battery" }
-                        ),
-                        NoteKind::Ok,
-                    );
-                    self.drift_acknowledged = false;
-                }
-                self.recheck_drift();
+        while let Ok(MonitorEvent::PowerChanged { on_ac, mode, triggered }) =
+            self.monitor_rx.try_recv()
+        {
+            self.on_ac = on_ac;
+            if triggered {
+                self.note(
+                    format!(
+                        "power source changed to {} - re-applied {mode}",
+                        if on_ac { "mains" } else { "battery" }
+                    ),
+                    NoteKind::Ok,
+                );
+                self.drift_acknowledged = false;
             }
+            self.recheck_drift();
         }
 
         if self.busy {
@@ -284,6 +292,168 @@ impl App {
                 self.push_result(r);
             }
         }
+    }
+}
+
+impl eframe::App for App {
+    /// Runs even when the window is hidden - the background watcher lives here.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_events(ctx);
+        self.ensure_tray();
+        // Something changed in the background; make sure a visible window repaints.
+        ctx.request_repaint();
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
+        // --- theme ---------------------------------------------------------
+        if self.theme_applied != self.settings.theme || !self.style_pushed {
+            match self.settings.theme {
+                Theme::System => {
+                    ctx.set_theme(egui::ThemePreference::System);
+                }
+                Theme::Light => {
+                    ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
+                    ctx.set_theme(egui::ThemePreference::Light);
+                }
+                Theme::Dark => {
+                    ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
+                    ctx.set_theme(egui::ThemePreference::Dark);
+                }
+            }
+            self.theme_applied = self.settings.theme;
+            self.style_pushed = true;
+        }
+
+        self.poll_events(&ctx);
+        self.ensure_tray();
+
+        let visuals = ui.visuals().clone();
+        let dark = visuals.dark_mode;
+        let tone = accent(self.settings.mode, dark);
+
+        // --- title bar -----------------------------------------------------
+        egui::Panel::top("titlebar")
+            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(8.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Image::new(&icon::texture(ui.ctx(), self.settings.mode))
+                            .fit_to_exact_size(Vec2::new(24.0, 24.0)),
+                    );
+                    ui.label(RichText::new("XMG Optimizer").size(15.0).strong());
+                    ui.add_space(8.0);
+                    pill(
+                        ui,
+                        if self.on_ac { "mains power" } else { "on battery" },
+                        self.on_ac,
+                    );
+                    if self.busy {
+                        ui.spinner();
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("x").on_hover_text("Close to tray").clicked() {
+                            self.hide_to_tray(ui.ctx());
+                        }
+                        if ui.button("-").on_hover_text("Minimise").clicked() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                        let (_, resp) =
+                            ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
+                        if resp.dragged() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                        }
+                    });
+                });
+            });
+
+        // --- tabs ----------------------------------------------------------
+        egui::Panel::top("tabs")
+            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(6.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (t, label) in [
+                        (Tab::Dashboard, "Dashboard"),
+                        (Tab::Backups, "Backups"),
+                        (Tab::Settings, "Settings"),
+                    ] {
+                        let sel = self.tab == t;
+                        let c = if sel {
+                            tone
+                        } else {
+                            visuals.weak_text_color()
+                        };
+                        let resp = ui.add(
+                            egui::Button::new(RichText::new(label).color(c).size(13.0))
+                                .fill(if sel {
+                                    tone.gamma_multiply(0.14)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                })
+                                .corner_radius(CornerRadius::same(8))
+                                .min_size(Vec2::new(96.0, 30.0)),
+                        );
+                        if resp.clicked() {
+                            self.tab = t;
+                        }
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if self.elevated_ready {
+                            pill(ui, "background task ready", true);
+                        } else if ui.button("Finish setup").clicked() {
+                            match elevate::ensure_setup() {
+                                Ok(true) => {
+                                    self.elevated_ready = true;
+                                    self.note("background task registered", NoteKind::Ok);
+                                }
+                                Ok(false) => self.note("setup incomplete", NoteKind::Warn),
+                                Err(e) => self.note(e, NoteKind::Err),
+                            }
+                        }
+                    });
+                });
+            });
+
+        // --- body ----------------------------------------------------------
+        egui::Panel::bottom("log")
+            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(8.0))
+            .resizable(true)
+            .default_size(120.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        for n in self.notes.iter().rev() {
+                            let c = match n.kind {
+                                NoteKind::Ok => visuals.weak_text_color(),
+                                NoteKind::Warn => egui::Color32::from_rgb(220, 160, 40),
+                                NoteKind::Err => egui::Color32::from_rgb(226, 80, 80),
+                            };
+                            ui.label(
+                                RichText::new(format!("{}  {}", n.stamp, n.text))
+                                    .size(12.0)
+                                    .color(c)
+                                    .monospace(),
+                            );
+                        }
+                    });
+            });
+
+        egui::Panel::central()
+            .frame(egui::Frame::new().fill(visuals.weak_bg_color).inner_margin(12.0))
+            .show(ui, |ui| match self.tab {
+                Tab::Dashboard => self.dashboard(ui),
+                Tab::Backups => self.backups(ui),
+                Tab::Settings => self.settings_tab(ui),
+            });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&glow::Context>) {
+        self.stop_watch.store(true, Ordering::Relaxed);
+        let _ = self.settings.save();
     }
 }
 
@@ -313,7 +483,7 @@ fn card<R>(
     } else {
         (
             ui.visuals().panel_fill,
-            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color()),
+            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
         )
     };
 
@@ -347,174 +517,19 @@ fn pill(ui: &mut egui::Ui, text: &str, good: bool) {
     egui::Frame::new()
         .fill(c.gamma_multiply(0.18))
         .corner_radius(CornerRadius::same(20))
-        .inner_margin(egui::Margin::symmetric(10, 4))
+        .inner_margin(Margin::symmetric(10, 4))
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(12.0).color(c));
         });
 }
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let want = match self.settings.theme {
-            Theme::System => None,
-            Theme::Light => Some(egui::Visuals::light()),
-            Theme::Dark => Some(egui::Visuals::dark()),
-        };
-        if self.theme_applied != self.settings.theme {
-            if let Some(v) = want {
-                ctx.set_visuals(v);
-            }
-            self.theme_applied = self.settings.theme;
-        }
-
-        self.poll_events(ctx);
-        self.ensure_tray();
-
-        let dark = ctx.style().visuals.dark_mode;
-        let tone = accent(self.settings.mode, dark);
-
-        egui::TopBottomPanel::top("titlebar")
-            .frame(egui::Frame::new().fill(ctx.style().visuals.panel_fill))
-            .show(ctx, |ui| {
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::Image::new(&icon::texture(ctx, self.settings.mode))
-                            .fit_to_exact_size(Vec2::new(24.0, 24.0)),
-                    );
-                    ui.label(RichText::new("XMG Optimizer").size(15.0).strong());
-                    ui.add_space(8.0);
-                    pill(
-                        ui,
-                        if self.on_ac { "mains power" } else { "on battery" },
-                        self.on_ac,
-                    );
-                    if self.busy {
-                        ui.spinner();
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("x").on_hover_text("Close to tray").clicked() {
-                            self.hide_to_tray();
-                        }
-                        if ui.button("-").on_hover_text("Minimise").clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                        }
-                        let (_, resp) =
-                            ui.allocate_exact_size(egui::available_size(), egui::Sense::drag());
-                        if resp.dragged() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                        }
-                    });
-                });
-                ui.add_space(4.0);
-            });
-
-        egui::TopBottomPanel::top("tabs")
-            .frame(egui::Frame::new().fill(ctx.style().visuals.panel_fill))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for (t, label) in [
-                        (Tab::Dashboard, "Dashboard"),
-                        (Tab::Backups, "Backups"),
-                        (Tab::Settings, "Settings"),
-                    ] {
-                        let sel = self.tab == t;
-                        let c = if sel {
-                            tone
-                        } else {
-                            ctx.style().visuals.weak_text_color()
-                        };
-                        let resp = ui.add(
-                            egui::Button::new(RichText::new(label).color(c).size(13.0))
-                                .fill(if sel {
-                                    tone.gamma_multiply(0.14)
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                })
-                                .corner_radius(CornerRadius::same(8))
-                                .min_size(Vec2::new(96.0, 30.0)),
-                        );
-                        if resp.clicked() {
-                            self.tab = t;
-                        }
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.elevated_ready {
-                            pill(ui, "background task ready", true);
-                        } else if ui.button("Finish setup").clicked() {
-                            match elevate::ensure_setup() {
-                                Ok(true) => {
-                                    self.elevated_ready = true;
-                                    self.note("background task registered", NoteKind::Ok);
-                                }
-                                Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                                Err(e) => self.note(e, NoteKind::Err),
-                            }
-                        }
-                    });
-                });
-                ui.add_space(4.0);
-            });
-
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(ctx.style().visuals.weak_bg_color()))
-            .show(ctx, |ui| match self.tab {
-                Tab::Dashboard => self.dashboard(ui),
-                Tab::Backups => self.backups(ui),
-                Tab::Settings => self.settings_tab(ui),
-            });
-
-        if !self.notes.is_empty() {
-            egui::TopBottomPanel::bottom("log")
-                .frame(egui::Frame::new().fill(ctx.style().visuals.panel_fill))
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(150.0)
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            for n in self.notes.iter().rev() {
-                                let c = match n.kind {
-                                    NoteKind::Ok => ctx.style().visuals.weak_text_color(),
-                                    NoteKind::Warn => egui::Color32::from_rgb(220, 160, 40),
-                                    NoteKind::Err => egui::Color32::from_rgb(226, 80, 80),
-                                };
-                                ui.label(
-                                    RichText::new(format!("{}  {}", n.stamp, n.text))
-                                        .size(12.0)
-                                        .color(c)
-                                        .monospace(),
-                                );
-                            }
-                        });
-                });
-        }
-    }
-
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.stop_watch.store(true, Ordering::Relaxed);
-        let _ = self.settings.save();
-    }
-}
-
 impl App {
-    fn ensure_tray(&mut self) {
-        if !self.tray_alive {
-            if let Some(t) = tray::build(self.settings.mode, self.on_ac, self.tx_tray.clone()) {
-                std::mem::forget(t);
-                self.tray_alive = true;
-            }
-        }
-    }
-
     // ------------------------------------------------------------ dashboard --
 
     fn dashboard(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         let on_ac = self.on_ac;
 
-        ui.add_space(8.0);
         ui.columns(2, |cols| {
             for (i, mode) in [Mode::Quiet, Mode::Performance].iter().enumerate() {
                 let selected = self.settings.mode == *mode;
@@ -740,37 +755,31 @@ impl App {
                             ui.label(RichText::new("Actual").size(11.0).strong());
                             ui.end_row();
                             for c in &report.checks {
-                                ui.label(
-                                    RichText::new(c.label)
-                                        .size(11.5)
-                                        .color(if c.consistent {
-                                            ui.visuals().text_color()
-                                        } else {
-                                            tint
-                                        }),
-                                );
+                                let col = if c.consistent {
+                                    ui.visuals().text_color()
+                                } else {
+                                    tint
+                                };
+                                ui.label(RichText::new(c.label).size(11.5).color(col));
                                 ui.label(
                                     RichText::new(drift::fmt_value(c.expected))
                                         .size(11.5)
                                         .monospace(),
                                 );
-                                let actual = c
-                                    .actual
-                                    .map(drift::fmt_value)
-                                    .unwrap_or_else(|| "not present".into());
+                                let actual =
+                                    c.actual.map(drift::fmt_value).unwrap_or_else(|| "not present".into());
+                                let col = if c.consistent {
+                                    ui.visuals().weak_text_color()
+                                } else {
+                                    tint
+                                };
+                                let text = if c.consistent {
+                                    actual
+                                } else {
+                                    format!("{actual}  (!)")
+                                };
                                 ui.label(
-                                    RichText::new(if c.consistent {
-                                        actual
-                                    } else {
-                                        format!("{actual}  (!)")
-                                    })
-                                    .size(11.5)
-                                    .monospace()
-                                    .color(if c.consistent {
-                                        ui.visuals().weak_text_color()
-                                    } else {
-                                        tint
-                                    }),
+                                    RichText::new(text).size(11.5).monospace().color(col),
                                 );
                                 ui.end_row();
                             }
@@ -809,7 +818,7 @@ impl App {
 
     fn backups(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
-        ui.add_space(8.0);
+        ui.add_space(4.0);
 
         egui::Frame::new()
             .fill(
@@ -842,7 +851,6 @@ impl App {
             });
 
         ui.add_space(12.0);
-
         section(ui, "Initial backup");
         ui.horizontal(|ui| {
             card(ui, false, egui::Color32::from_rgb(34, 150, 90), |ui| {
@@ -884,8 +892,10 @@ impl App {
         if self.confirm_stage > 0 {
             ui.add_space(8.0);
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(200, 120, 40)
-                    .gamma_multiply(if dark { 0.14 } else { 0.10 }))
+                .fill(
+                    egui::Color32::from_rgb(200, 120, 40)
+                        .gamma_multiply(if dark { 0.14 } else { 0.10 }),
+                )
                 .corner_radius(CornerRadius::same(10))
                 .inner_margin(12.0)
                 .show(ui, |ui| match self.confirm_stage {
@@ -963,7 +973,7 @@ impl App {
                 });
         }
 
-        ui.add_space(14.0);
+        ui.add_space(12.0);
         section(ui, &format!("Snapshots ({})", self.snapshots.len()));
         ui.horizontal(|ui| {
             if ui.button("Take a snapshot now").clicked() {
@@ -978,7 +988,7 @@ impl App {
         });
         ui.add_space(6.0);
 
-        egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
             if self.snapshots.is_empty() {
                 ui.label(
                     RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
@@ -1039,11 +1049,12 @@ impl App {
 
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
-        ui.add_space(8.0);
+        let tone = accent(Mode::Quiet, dark);
+        ui.add_space(4.0);
         let mut changed = false;
 
         section(ui, "Startup");
-        card(ui, false, accent(Mode::Quiet, dark), |ui| {
+        card(ui, false, tone, |ui| {
             let before = self.settings.start_with_system;
             ui.checkbox(&mut self.settings.start_with_system, "Start with Windows");
             if before != self.settings.start_with_system {
@@ -1084,7 +1095,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Power watching");
-        card(ui, false, accent(Mode::Quiet, dark), |ui| {
+        card(ui, false, tone, |ui| {
             ui.checkbox(
                 &mut self.settings.auto_switch_on_power_change,
                 "Re-apply automatically when the charger changes",
@@ -1106,8 +1117,11 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Behaviour");
-        card(ui, false, accent(Mode::Quiet, dark), |ui| {
-            ui.checkbox(&mut self.settings.confirm_before_apply, "Ask before applying a mode");
+        card(ui, false, tone, |ui| {
+            ui.checkbox(
+                &mut self.settings.confirm_before_apply,
+                "Ask before applying a mode",
+            );
             ui.checkbox(
                 &mut self.settings.control_fans,
                 "Control fans through the XMG fan app",
@@ -1120,7 +1134,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Appearance");
-        card(ui, false, accent(Mode::Quiet, dark), |ui| {
+        card(ui, false, tone, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Theme");
                 for t in [Theme::System, Theme::Light, Theme::Dark] {
@@ -1137,17 +1151,13 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Elevation");
-        card(ui, false, accent(Mode::Quiet, dark), |ui| {
+        card(ui, false, tone, |ui| {
             if self.elevated_ready {
+                ui.label(RichText::new("Background task registered").strong().size(13.0));
                 ui.label(
-                    RichText::new("Background task registered").strong().size(13.0),
-                );
-                ui.label(
-                    RichText::new(
-                        "Applying a mode does not prompt for administrator rights.",
-                    )
-                    .size(11.5)
-                    .color(ui.visuals().weak_text_color()),
+                    RichText::new("Applying a mode does not prompt for administrator rights.")
+                        .size(11.5)
+                        .color(ui.visuals().weak_text_color()),
                 );
             } else {
                 ui.label(

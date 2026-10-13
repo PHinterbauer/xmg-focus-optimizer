@@ -60,7 +60,7 @@ replaced, so upgrading never starts from a blank slate.
 
 | Where | What |
 |---|---|
-| **Dashboard** | Pick Quiet or Performance, apply, and see what is currently active |
+| **Dashboard** | Pick Quiet or Performance, apply, and see the consistency check |
 | **Backups** | Take snapshots, restore from the initial backup, a snapshot, or an archived backup |
 | **Settings** | Start with Windows, collapse to tray, automatic re-apply on power change, theme |
 
@@ -69,6 +69,46 @@ previous one.
 
 Closing the window collapses it into the notification area so the background power watcher keeps
 running. Quit from the tray menu or the Settings tab.
+
+### Consistency check
+
+The Dashboard compares **every one of the 16 settings** against what the selected mode should
+produce for the current power source, and tells you when they disagree. Expand **Show all settings**
+to see expected versus actual for each.
+
+When something differs you get a choice, and the app changes nothing until you pick:
+
+- **Change to Quiet / Performance** — rewrite the settings to match the mode
+- **Keep current settings** — leave the machine exactly as it is
+
+The check also notices when the active power scheme is not one this app created, which is usually
+what happens after another tool or a manual change has taken over.
+
+> **One subtlety.** A power scheme stores a separate AC and DC column, and this app writes the
+> values for the *current* power source into **both**. So after a normal apply on mains, the scheme
+> legitimately holds the mains numbers even once you move to battery. Counting that as drift would
+> mean a permanent false alarm, so a setting is treated as consistent when it matches the current
+> source's values **or** the other source's. Only a value matching neither — an outside change, a
+> different tool, a hand-edited scheme — is reported.
+
+### Re-applying does nothing when nothing is wrong
+
+Applying first runs the consistency check. If the active scheme already belongs to this app and
+every setting matches, the scheme is left completely untouched — no rewrite, no new scheme. Startup
+entries, GPU limit and fans are still ensured, because those are not stored in the scheme.
+
+### Surviving a restart
+
+The selected mode is saved the moment you pick it, so it is still there after a reboot.
+
+With **Start with Windows** on (the default, and it is registered in the registry on first run),
+the app launches from the Run key, notices it was started by Windows, and silently re-applies the
+saved mode. Since applying is idempotent, this normally changes nothing at all — it just guarantees
+the laptop came up the way you left it. A snapshot is still recorded each time, so there is a
+record of the state at sign-in.
+
+The Run key is reconciled against the stored preference on every launch, so the checkbox in
+Settings and the actual registry entry can never drift apart.
 
 ### Background behaviour
 

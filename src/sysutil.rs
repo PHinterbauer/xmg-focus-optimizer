@@ -1,4 +1,4 @@
-//! Small Windows helpers: elevation, power state, single-instance lock.
+﻿//! Small Windows helpers: elevation, power state, single-instance lock.
 //!
 //! Note the convention throughout: in `windows` 0.62 most Win32 entry points
 //! return `Result<T>`, and several constants are newtypes whose payload lives
@@ -25,7 +25,7 @@ pub fn is_elevated() -> bool {
         let ok = GetTokenInformation(
             token,
             TokenElevation,
-            Some(&mut elevation as *mut _ as *mut u8),
+            Some(&mut elevation as *mut _ as *mut core::ffi::c_void),
             std::mem::size_of::<TOKEN_ELEVATION>() as u32,
             &mut returned,
         )
@@ -105,8 +105,11 @@ pub fn acquire_single_instance(name: &str) -> Result<SingleInstance, ()> {
 
 /// Signals an already running instance to bring its window forward.
 pub fn notify_existing_instance(name: &str) {
-    use windows::Win32::Security::SYNCHRONIZE;
-    use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+    use windows::Win32::System::Threading::{
+        OpenEventW, SetEvent, EVENT_MODIFY_STATE, SYNCHRONIZATION_ACCESS_RIGHTS,
+    };
+    // SYNCHRONIZE is not exported by the crate, so build the mask by hand.
+    const SYNCHRONIZE: SYNCHRONIZATION_ACCESS_RIGHTS = SYNCHRONIZATION_ACCESS_RIGHTS(0x0010_0000);
 
     let event_name = wide(&format!("{name}-show"));
     unsafe {

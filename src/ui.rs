@@ -48,6 +48,10 @@ enum NoteKind {
 }
 
 pub struct App {
+    /// egui is cheap to clone, and holding it lets helpers send viewport
+    /// commands before the first frame has been painted.
+    ctx: egui::Context,
+
     settings: Settings,
     tab: Tab,
     on_ac: bool,
@@ -86,6 +90,7 @@ pub struct App {
 impl App {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        ctx: egui::Context,
         settings: Settings,
         autostarted: bool,
         tray_rx: Receiver<TrayCommand>,
@@ -99,6 +104,7 @@ impl App {
         let (snapshots, archives, backup_dir, has_factory) = Self::state().unwrap_or_default();
 
         let mut app = App {
+            ctx,
             settings,
             tab: Tab::Dashboard,
             on_ac,
@@ -179,14 +185,17 @@ impl App {
         self.drift = Some(drift::check(self.settings.mode, self.on_ac));
     }
 
-    fn hide_to_tray(&self, ctx: &egui::Context) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+    fn hide_to_tray(&self) {
+        self.ctx
+            .send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
-    fn show_window(&self, ctx: &egui::Context) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    fn show_window(&self) {
+        self.ctx
+            .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        self.ctx
+            .send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        self.ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
 
     fn note(&mut self, text: impl Into<String>, kind: NoteKind) {
@@ -246,10 +255,10 @@ impl App {
     }
 
     /// Drains both channels. Runs whether or not the window is visible.
-    fn poll_events(&mut self, ctx: &egui::Context) {
+    fn poll_events(&mut self) {
         while let Ok(cmd) = self.tray_rx.try_recv() {
             match cmd {
-                TrayCommand::Show => self.show_window(ctx),
+                TrayCommand::Show => self.show_window(),
                 TrayCommand::Apply(m) => {
                     if self.settings.mode != m {
                         self.settings.mode = m;
@@ -260,11 +269,11 @@ impl App {
                 }
                 TrayCommand::Restore => {
                     self.tab = Tab::Backups;
-                    self.show_window(ctx);
+                    self.show_window();
                 }
                 TrayCommand::Quit => {
                     self.stop_watch.store(true, Ordering::Relaxed);
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
         }
@@ -298,7 +307,7 @@ impl App {
 impl eframe::App for App {
     /// Runs even when the window is hidden - the background watcher lives here.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_events(ctx);
+        self.poll_events();
         self.ensure_tray();
         // Something changed in the background; make sure a visible window repaints.
         ctx.request_repaint();
@@ -308,7 +317,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
 
         // --- theme ---------------------------------------------------------
-        if self.theme_applied != self.settings.theme || !self.style_pushed {
+        if self.theme_applied != Some(self.settings.theme) || !self.style_pushed {
             match self.settings.theme {
                 Theme::System => {
                     ctx.set_theme(egui::ThemePreference::System);
@@ -322,11 +331,11 @@ impl eframe::App for App {
                     ctx.set_theme(egui::ThemePreference::Dark);
                 }
             }
-            self.theme_applied = self.settings.theme;
+            self.theme_applied = Some(self.settings.theme);
             self.style_pushed = true;
         }
 
-        self.poll_events(&ctx);
+        self.poll_events();
         self.ensure_tray();
 
         let visuals = ui.visuals().clone();
@@ -355,7 +364,7 @@ impl eframe::App for App {
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("x").on_hover_text("Close to tray").clicked() {
-                            self.hide_to_tray(ui.ctx());
+                            self.hide_to_tray();
                         }
                         if ui.button("-").on_hover_text("Minimise").clicked() {
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -442,8 +451,8 @@ impl eframe::App for App {
                     });
             });
 
-        egui::Panel::central()
-            .frame(egui::Frame::new().fill(visuals.weak_bg_color).inner_margin(12.0))
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(12.0))
             .show(ui, |ui| match self.tab {
                 Tab::Dashboard => self.dashboard(ui),
                 Tab::Backups => self.backups(ui),
@@ -451,7 +460,7 @@ impl eframe::App for App {
             });
     }
 
-    fn on_exit(&mut self, _gl: Option<&glow::Context>) {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.stop_watch.store(true, Ordering::Relaxed);
         let _ = self.settings.save();
     }
@@ -494,7 +503,7 @@ fn card<R>(
         .stroke(stroke)
         .show(ui, add_contents);
 
-    resp.interact(egui::Sense::click())
+    resp.response.interact(egui::Sense::click()).clicked()
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {
@@ -560,7 +569,7 @@ impl App {
                     let p = profile::Params::for_mode(*mode, on_ac);
                     ui.label(
                         RichText::new(format!(
-                            "CPU cap {}%   •   efficiency {}   •   GPU {} W\nFans {}   •   noiseless {}",
+                            "CPU cap {}%   â€¢   efficiency {}   â€¢   GPU {} W\nFans {}   â€¢   noiseless {}",
                             p.cpu_max,
                             p.epp,
                             p.gpu_watts,
@@ -653,7 +662,7 @@ impl App {
                     );
                     ui.label(
                         RichText::new(format!(
-                            "Active scheme: {}  •  checked just now",
+                            "Active scheme: {}  â€¢  checked just now",
                             report.scheme_name
                         ))
                         .size(11.5)
@@ -806,7 +815,7 @@ impl App {
                     "changes a setting you asked it to keep",
                 ] {
                     ui.label(
-                        RichText::new(format!("  •  {line}"))
+                        RichText::new(format!("  â€¢  {line}"))
                             .size(12.0)
                             .color(ui.visuals().weak_text_color()),
                     );
@@ -988,24 +997,31 @@ impl App {
         });
         ui.add_space(6.0);
 
+        // Own the rows first: iterating a field of `self` while calling
+        // `self.submit(..)` inside the closure would borrow self twice.
+        let rows: Vec<(String, String, &'static str)> = self
+            .snapshots
+            .iter()
+            .map(|s| {
+                let kind = match s.kind {
+                    backup::SnapshotKind::Automatic => "auto",
+                    backup::SnapshotKind::Manual => "manual",
+                };
+                (s.id.clone(), format!("{}  {}", s.created, s.label), kind)
+            })
+            .collect();
+
         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-            if self.snapshots.is_empty() {
+            if rows.is_empty() {
                 ui.label(
                     RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
                 );
             }
-            for s in self.snapshots.iter() {
-                let id = s.id.clone();
+            for (id, text, kind) in rows.iter() {
                 ui.horizontal(|ui| {
-                    let kind = match s.kind {
-                        backup::SnapshotKind::Automatic => "auto",
-                        backup::SnapshotKind::Manual => "manual",
-                    };
+                    ui.label(RichText::new(text.clone()).size(12.0));
                     ui.label(
-                        RichText::new(format!("{}  {}", s.created, s.label)).size(12.0),
-                    );
-                    ui.label(
-                        RichText::new(kind)
+                        RichText::new(*kind)
                             .size(11.0)
                             .color(ui.visuals().weak_text_color()),
                     );
@@ -1024,14 +1040,14 @@ impl App {
         if !self.archives.is_empty() {
             ui.add_space(10.0);
             section(ui, "Archived initial backups");
-            for a in self.archives.iter() {
-                let id = a.id.clone();
+            let arch: Vec<(String, String)> = self
+                .archives
+                .iter()
+                .map(|a| (a.id.clone(), format!("{}  {}", a.id, a.note)))
+                .collect();
+            for (id, text) in arch.iter() {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("{}  {}", a.id, a.note))
-                            .size(12.0)
-                            .monospace(),
-                    );
+                    ui.label(RichText::new(text.clone()).size(12.0).monospace());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.small_button("Restore").clicked() {
                             self.submit(Job::Restore {
@@ -1200,7 +1216,7 @@ impl App {
             }
             ui.label(
                 RichText::new(format!(
-                    "elevated: {}  •  launched: {}",
+                    "elevated: {}  â€¢  launched: {}",
                     if sysutil::is_elevated() { "yes" } else { "no (normal)" },
                     if self.autostarted { "by Windows" } else { "by you" }
                 ))

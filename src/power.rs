@@ -1,4 +1,4 @@
-//! Reading and writing Windows power settings through `powercfg`.
+﻿//! Reading and writing Windows power settings through `powercfg`.
 //!
 //! Every write is read back and compared, so the UI can report what actually
 //! landed on the machine rather than what we hoped would.
@@ -123,18 +123,15 @@ pub fn read_all(scheme: &str) -> HashMap<String, Value> {
 
     let mut set_guid = String::new();
     let mut ac: Option<u32> = None;
-    let mut dc: Option<u32> = None;
 
     for line in txt.lines() {
         let l = line.trim();
         if let Some(g) = after(l, "Power Setting GUID:") {
             set_guid = g.to_ascii_lowercase();
             ac = None;
-            dc = None;
         } else if let Some(v) = hex_after(l, "Current AC Power Setting Index:") {
             ac = Some(v);
         } else if let Some(v) = hex_after(l, "Current DC Power Setting Index:") {
-            dc = Some(v);
             if let (Some(a), Some(s)) = (ac, Some(set_guid.clone())) {
                 if !s.is_empty() {
                     map.insert(s, Value { ac: a, dc: v });

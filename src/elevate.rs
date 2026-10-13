@@ -100,7 +100,7 @@ pub fn elevate_directly() -> bool {
             SW_HIDE,
         );
         // ShellExecuteW returns a handle; anything above 32 means success.
-        (r as isize) > 32
+        r.0 as isize > 32
     }
     #[cfg(not(windows))]
     {
@@ -149,7 +149,7 @@ pub fn ensure_setup() -> Result<bool, String> {
             None,
             SW_HIDE,
         );
-        if (r as isize) > 32 {
+        if r.0 as isize > 32 {
             // Give the elevated process a moment to create the task.
             for _ in 0..20 {
                 if task_exists() {

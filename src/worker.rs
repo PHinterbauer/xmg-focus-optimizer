@@ -278,7 +278,7 @@ fn do_restore(source: &RestoreSource) -> JobResult {
     };
     let rows = backup::parse_backup(&text);
     if rows.is_empty() {
-        return JobResult::fail("That backup contains no usable settings. Nothing was changed.".into());
+        return JobResult::fail("That backup contains no usable settings. Nothing was changed.");
     }
 
     let scheme = match power::active_scheme() {

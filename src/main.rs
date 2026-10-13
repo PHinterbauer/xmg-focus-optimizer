@@ -21,6 +21,8 @@ mod power;
 mod profile;
 mod startup;
 mod sysutil;
+#[cfg(test)]
+mod tests;
 mod tray;
 mod ui;
 mod worker;
@@ -203,8 +205,9 @@ fn run_gui(start_hidden: bool, autostarted: bool) {
     let run = eframe::run_native(
         "XMG Optimizer",
         native,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
             let app: Box<dyn eframe::App> = Box::new(ui::App::new(
+                cc.egui_ctx.clone(),
                 settings_for_app,
                 autostarted,
                 rx_tray,

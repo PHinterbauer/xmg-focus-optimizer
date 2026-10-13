@@ -28,13 +28,13 @@ pub fn build(mode: Mode, on_ac: bool, tx: Sender<TrayCommand>) -> Option<Tray> {
         "XMG Optimizer - {} ({})",
         mode.label(),
         if on_ac { "mains" } else { "battery" }
-    ));
-    let show = MenuItem::new("Open");
-    let quiet = MenuItem::new("Apply Quiet");
-    let perf = MenuItem::new("Apply Performance");
-    let restore = MenuItem::new("Restore settings...");
+    ), true, None);
+    let show = MenuItem::new("Open", true, None);
+    let quiet = MenuItem::new("Apply Quiet", true, None);
+    let perf = MenuItem::new("Apply Performance", true, None);
+    let restore = MenuItem::new("Restore settings...", true, None);
     let sep = PredefinedMenuItem::separator();
-    let quit = MenuItem::new("Quit");
+    let quit = MenuItem::new("Quit", true, None);
 
     menu.append(&head).ok()?;
     menu.append(&sep).ok()?;

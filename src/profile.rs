@@ -1,4 +1,4 @@
-//! The two optimisation modes and the exact Windows power-setting GUIDs.
+﻿//! The two optimisation modes and the exact Windows power-setting GUIDs.
 //!
 //! Every GUID in this file was verified against this specific machine with
 //! `powercfg /qh` before it was written down. They are reproduced verbatim so
@@ -16,6 +16,12 @@ use serde::{Deserialize, Serialize};
 pub enum Mode {
     Quiet,
     Performance,
+}
+
+impl std::fmt::Display for Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 impl Mode {

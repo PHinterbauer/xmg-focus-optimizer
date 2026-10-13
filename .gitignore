@@ -1,0 +1,22 @@
+# Build output
+/target
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Never commit real machine backups - they contain this machine's GUIDs,
+# registry values and GPU limits. Keep the folder, not its contents.
+/XMG-Backup/
+**/XMG-Backup/
+
+# Generated previews
+assets/icon-preview.png

@@ -135,6 +135,8 @@ impl App {
             app.hide_to_tray();
         }
         app.refresh();
+        // Reconciles this app's own Run entry with the stored preference, and
+        // nothing else. Another program's startup entry is never touched.
         app.reconcile_autostart();
         app.recheck_drift();
 
@@ -585,7 +587,7 @@ impl App {
                     let p = profile::Params::for_mode(*mode, on_ac);
                     ui.label(
                         RichText::new(format!(
-                            "CPU cap {}%   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢   efficiency {}   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢   GPU {} W\nFans {}   ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢   noiseless {}",
+                            "CPU cap {}%   \u{2022}   efficiency {}   \u{2022}   GPU {} W\nFans {}   \u{2022}   noiseless {}",
                             p.cpu_max,
                             p.epp,
                             p.gpu_watts,
@@ -681,7 +683,7 @@ impl App {
                     );
                     ui.label(
                         RichText::new(format!(
-                            "Active scheme: {}  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢  checked just now",
+                            "Active scheme: {}  \u{2022}  checked just now",
                             report.scheme_name
                         ))
                         .size(11.5)
@@ -832,9 +834,10 @@ impl App {
                     "touches the BIOS or flashes firmware",
                     "writes undocumented EC or driver binaries",
                     "changes a setting you asked it to keep",
+                    "adds, removes, delays or rewrites startup entries",
                 ] {
                     ui.label(
-                        RichText::new(format!("  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢  {line}"))
+                        RichText::new(format!("  \u{2022}  {line}"))
                             .size(12.0)
                             .color(ui.visuals().weak_text_color()),
                     );
@@ -1088,13 +1091,14 @@ impl App {
         ui.add_space(4.0);
         let mut changed = false;
 
-        section(ui, "Startup");
+        section(ui, "Launch");
         card(ui, false, tone, |ui| {
             let before = self.settings.start_with_system;
             ui.checkbox(&mut self.settings.start_with_system, "Start with Windows");
             if before != self.settings.start_with_system {
                 changed = true;
-                // Act on it straight away rather than waiting for "Save".
+                // Act on it straight away rather than waiting for "Save". This
+                // writes the app's own entry and nothing else.
                 match startup::set_self_autostart(self.settings.start_with_system) {
                     Ok(_) => self.note(
                         if self.settings.start_with_system {
@@ -1109,9 +1113,9 @@ impl App {
             }
             ui.label(
                 RichText::new(
-                    "On every sign-in the app restores your last mode. Because applying is \
-                     idempotent it normally changes nothing - it just makes sure the laptop \
-                     came up the way you left it.",
+                    "This adds and removes only this app's own entry. Applying a mode never \
+                     adds, removes, delays or rewrites another program's startup entry - what \
+                     you have set up in Task Manager is left alone.",
                 )
                 .size(11.5)
                 .color(ui.visuals().weak_text_color()),
@@ -1119,10 +1123,10 @@ impl App {
             ui.add_space(6.0);
             ui.checkbox(
                 &mut self.settings.start_minimized_to_tray,
-                "Collapse into the tray on start",
+                "Collapse into the tray when opened",
             );
             ui.label(
-                RichText::new("Opens straight into the notification area instead of a window.")
+                RichText::new("Starts straight in the notification area instead of a window.")
                     .size(11.5)
                     .color(ui.visuals().weak_text_color()),
             );
@@ -1235,7 +1239,7 @@ impl App {
             }
             ui.label(
                 RichText::new(format!(
-                    "elevated: {}  ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢  launched: {}",
+                    "elevated: {}  \u{2022}  launched: {}",
                     if sysutil::is_elevated() { "yes" } else { "no (normal)" },
                     if self.autostarted { "by Windows" } else { "by you" }
                 ))

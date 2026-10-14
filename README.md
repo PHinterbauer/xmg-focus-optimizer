@@ -26,7 +26,7 @@
 | **Quiet** | CPU capped at 70%, Windows biased toward the integrated GPU, RTX throttled to 25 W, fans kept quiet |
 | **Performance** | Full boost, every power saving dropped, GPU at its 85 W maximum, fans on turbo |
 | **Automatic** | Unplug the charger and the battery values are applied. Plug it back in and mains returns. |
-| **Persistent** | Re-launches at sign-in and quietly restores whichever mode you had selected. |
+| **Persistent** | Registers *itself* to come back at sign-in and quietly restores whichever mode you had selected. |
 
 Verified across all four mains/battery combinations on the target machine.
 
@@ -45,6 +45,14 @@ Every change this app makes is reversible, and a way back exists **before** each
   <br><sub>*its parameters are unpublished, and a wrong call can leave a laptop unbootable*</sub>
 - deletes a power scheme it did not create
 - changes a setting you asked it to keep
+- adds, removes, delays or rewrites **another program's startup entry** &mdash; applying a mode never
+  touches OneDrive, LG HUB, Edge, Docker, Roblox or anything else that launches at sign-in
+
+> [!NOTE]
+> The one startup entry the app writes is **its own**, `XMGOptimizer`, so it can come back at sign-in.
+> That entry is added and removed only by the *Start with Windows* checkbox. The per-entry
+> enabled/disabled flags Task Manager uses are never read or written, so what each program does at
+> sign-in stays exactly as you arranged it.
 
 **What it writes** &mdash; 16 standard Windows power settings through `powercfg`, the NVIDIA power
 limit via `nvidia-smi`, and a few `HKCU` registry values. Every power setting is **read back and
@@ -67,7 +75,7 @@ is sent, so a faulty driver reading cannot push the hardware past what it suppor
 ```
 XMG-Backup/
 ├── original-settings.txt          ← the initial backup, kept forever
-├── original-autostart.txt
+├── original-autostart.txt            ← a read-only record of your sign-in; never written back
 ├── original-gaming.json
 ├── original-gpu-limit.txt
 ├── snapshots/                     ← before every single change
@@ -108,8 +116,7 @@ current power source. When something disagrees, the app changes nothing until yo
 
 **Re-applying does nothing when nothing is wrong.** Applying runs the check first; if the active
 scheme already belongs to the app and every setting matches, the scheme is left completely
-untouched. Startup entries, GPU limit and fans are still ensured, because those are not stored in
-the scheme.
+untouched. The GPU limit and fans are still ensured, because those are not stored in the scheme.
 
 ---
 

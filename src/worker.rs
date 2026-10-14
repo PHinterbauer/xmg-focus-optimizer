@@ -14,7 +14,6 @@ use crate::gpu;
 use crate::jobs::{Job, JobResult};
 use crate::power;
 use crate::profile::{self, Mode};
-use crate::startup::{self, StartupAction};
 
 /// Scheme-name prefix. Only schemes carrying this exact prefix are ever
 /// deleted, so built-in schemes are structurally out of reach.
@@ -179,7 +178,10 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
 }
 
 /// The parts of an apply that always run, whether or not the power settings
-/// needed rewriting: startup entries, GPU limit and fans.
+/// needed rewriting: GPU limit and fans.
+///
+/// Note what is *not* here: startup entries. Applying a mode never disables,
+/// delays or otherwise edits another program's sign-in behaviour.
 fn finish_apply(
     r: &mut JobResult,
     mode: Mode,
@@ -188,20 +190,6 @@ fn finish_apply(
     control_fans: bool,
     control_gpu: bool,
 ) {
-    // Startup entries
-    for (name, label) in startup::DISABLED {
-        match startup::apply(StartupAction::Disable, name, 0) {
-            Ok(msg) => r.details.push(format!("{label}: {msg}")),
-            Err(e) => r.warnings.push(format!("{label}: {e}")),
-        }
-    }
-    for (name, delay, label) in startup::DELAYED {
-        match startup::apply(StartupAction::Delay(*delay), name, *delay) {
-            Ok(msg) => r.details.push(format!("{label}: {msg}")),
-            Err(e) => r.warnings.push(format!("{label}: {e}")),
-        }
-    }
-
     // GPU power limit
     if control_gpu {
         match gpu::set_limit_capped(params.gpu_watts) {
@@ -297,14 +285,12 @@ fn do_restore(source: &RestoreSource) -> JobResult {
             .push(format!("{} could not be restored: {}", rep.failed.len(), rep.failed.join(", ")));
     }
 
-    // Restore startup entries and the GPU limit when an initial backup is used.
+    // Restore the GPU limit when an initial backup is used. Startup entries are
+    // deliberately absent: this app never modifies them, so there is nothing
+    // of ours to put back and rewriting them could only disturb the user's
+    // sign-in.
     if matches!(source, RestoreSource::Factory) {
         if let Ok(base) = crate::paths::backup_dir() {
-            let (ok, skipped) = startup::restore_autostart(&base);
-            r.details.push(format!("Startup entries: {ok} restored"));
-            if !skipped.is_empty() {
-                r.warnings.push(format!("skipped: {}", skipped.join(", ")));
-            }
             if let Some(w) = gpu::stored_limit(&base) {
                 if let Ok(true) = gpu::set_limit(w) {
                     r.details.push(format!("GPU power limit: {w} W"));

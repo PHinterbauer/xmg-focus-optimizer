@@ -33,7 +33,8 @@ pub struct Settings {
     /// Currently selected optimisation mode.
     pub mode: Mode,
 
-    /// Register the app so it launches when the user signs in.
+    /// Add this app to the Run key so it comes back at sign-in. This covers the
+    /// app's own entry only - never another program's.
     pub start_with_system: bool,
 
     /// Close to the notification area instead of quitting, so the background
@@ -63,8 +64,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Quiet,
-            // On by default: the whole point is that it keeps the laptop right
-            // when the charger comes out mid-session.
+            // On by default: the app keeps the laptop right when the charger comes
+            // out mid-session, without you having to open it.
             start_with_system: true,
             start_minimized_to_tray: true,
             auto_switch_on_power_change: true,

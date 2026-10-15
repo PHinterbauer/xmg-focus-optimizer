@@ -226,7 +226,17 @@ mod tests {
     #[test]
     fn plate_colour_is_the_agreed_violet() {
         let buf = draw(64);
-        assert_eq!(at(&buf, 32, 32), [PLATE[0], PLATE[1], PLATE[2], 255]);
+        // Four points on the plate but clear of the glyph. Not the centre, and
+        // not straight above or below it: the stem runs up the middle with a
+        // round cap that reaches past the ring, so every pixel on that line is
+        // glyph-white. These four sit outside the ring's outer edge instead.
+        for (x, y) in [(32u32, 52u32), (16, 32), (48, 32), (20, 48)] {
+            assert_eq!(
+                at(&buf, x, y),
+                [PLATE[0], PLATE[1], PLATE[2], 255],
+                "plate is the wrong colour at ({x}, {y})"
+            );
+        }
     }
 
     #[test]
@@ -234,7 +244,13 @@ mod tests {
         // The gap must be around 270 degrees - straight up. The old drawing put
         // it at 180 (the left) while drawing a vertical stem at the top, which
         // is the bug these assertions guard against.
-        for deg in 262..=278 {
+        //
+        // The gap cannot be sampled at exactly 270: the stem occupies that
+        // point, so it reads as glyph. It is sampled either side of the stem
+        // instead. The stem is about asin(sw/2 / ring) ~= 13 degrees wide
+        // there, so 20 to 30 degrees off centre is clear of it and still
+        // comfortably inside the 90 degree gap, which runs 225 to 315.
+        for deg in [240u32, 247, 254, 286, 293, 300] {
             assert!(gap_at(deg), "ring should be open near {deg} degrees (straight up)");
         }
         // ...and the ring must be closed everywhere else.

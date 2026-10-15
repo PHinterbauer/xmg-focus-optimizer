@@ -1,4 +1,4 @@
-//! NVIDIA GPU power limit, driven through `nvidia-smi`.
+﻿//! NVIDIA GPU power limit, driven through `nvidia-smi`.
 //!
 //! Safety: a wattage is only ever sent after it has been range-checked *and*
 //! compared against the device's own reported maximum. A bogus reading from a
@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::errors::{AppError, AppResult};
+use crate::log::{log_error};
 
 fn smi(args: &[&str]) -> Option<String> {
     let out = Command::new("nvidia-smi").args(args).output().ok()?;
@@ -22,7 +23,7 @@ fn smi_ok(args: &[&str]) -> bool {
             o.status.success()
         }
         Err(e) => {
-            crate::log_error!("nvidia-smi could not be started: {e}");
+            log_error!("nvidia-smi could not be started: {e}");
             false
         }
     }

@@ -8,6 +8,7 @@ use std::process::Command;
 
 use crate::errors::{AppError, AppResult};
 use crate::profile::PlanEntry;
+use crate::log::{log_error};
 
 /// Runs `powercfg` and returns stdout.
 fn powercfg(args: &[&str]) -> AppResult<String> {
@@ -15,12 +16,12 @@ fn powercfg(args: &[&str]) -> AppResult<String> {
         .args(args)
         .output()
         .map_err(|e| {
-            crate::log_error!("powercfg could not be started: {e}");
+            log_error!("powercfg could not be started: {e}");
             AppError::Power(format!("powercfg could not be started: {e}"))
         })?;
     crate::log::command("powercfg", args, &out);
     if !out.status.success() {
-        crate::log_error!(
+        log_error!(
             "powercfg {} failed: {}",
             args.join(" "),
             String::from_utf8_lossy(&out.stderr).trim()

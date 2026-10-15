@@ -133,25 +133,28 @@ pub fn emit(level: Level, msg: String) {
     write(level, &msg);
 }
 
-#[macro_export]
+// These are plain `macro_rules!` re-exported with `pub(crate) use`, rather than
+// `#[macro_export]`. A #[macro_export] macro lands at the crate root and then
+// has to be imported at every call site anyway - and forgotten ones fail to
+// compile. This way `use crate::log::log_info;` is the whole story, and the
+// compiler points at the module that forgot it.
 macro_rules! log_error {
     ($($arg:tt)*) => { $crate::log::emit($crate::log::Level::Error, format!($($arg)*)) };
 }
-
-#[macro_export]
 macro_rules! log_warn {
     ($($arg:tt)*) => { $crate::log::emit($crate::log::Level::Warn, format!($($arg)*)) };
 }
-
-#[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => { $crate::log::emit($crate::log::Level::Info, format!($($arg)*)) };
 }
-
-#[macro_export]
 macro_rules! log_debug {
     ($($arg:tt)*) => { $crate::log::emit($crate::log::Level::Debug, format!($($arg)*)) };
 }
+
+pub(crate) use log_debug;
+pub(crate) use log_error;
+pub(crate) use log_info;
+pub(crate) use log_warn;
 
 /// Logs a command that is about to be run, and how it went.
 ///

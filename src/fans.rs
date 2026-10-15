@@ -29,6 +29,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::profile::{FanMode, Params};
+use crate::log::{log_info, log_warn};
 
 /// Window class of the vendor app.
 const APP_WINDOW_CLASS: &str = "FanSpeedSetting";

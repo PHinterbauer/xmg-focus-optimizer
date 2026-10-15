@@ -34,6 +34,7 @@ use std::sync::mpsc::channel;
 use config::Settings;
 use jobs::Job;
 use profile::Mode;
+use crate::log::{log_error, log_info, log_warn};
 
 const MUTEX_NAME: &str = "Local\\XMGOptimizerSingleton";
 

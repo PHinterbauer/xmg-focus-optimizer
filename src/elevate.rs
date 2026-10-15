@@ -8,6 +8,7 @@
 use std::process::Command;
 
 use crate::jobs::{self, Job, JobResult};
+use crate::log::{log_error, log_info, log_warn};
 
 pub const TASK_NAME: &str = "XMG-Optimizer-Worker";
 
@@ -16,7 +17,7 @@ fn run_task(args: &[&str]) -> bool {
     let out = match Command::new("schtasks").args(args).output() {
         Ok(o) => o,
         Err(e) => {
-            crate::log_error!("schtasks could not be started: {e}");
+            log_error!("schtasks could not be started: {e}");
             return false;
         }
     };
@@ -32,7 +33,7 @@ pub fn task_exists() -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    crate::log_info!("scheduled task registered: {ok}");
+    log_info!("scheduled task registered: {ok}");
     ok
 }
 
@@ -45,7 +46,7 @@ pub fn unregister_task() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false);
     if ok {
-        crate::log_info!("scheduled task removed");
+        log_info!("scheduled task removed");
     }
     ok
 }

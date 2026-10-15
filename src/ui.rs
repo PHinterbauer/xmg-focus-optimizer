@@ -229,8 +229,8 @@ impl App {
     fn note(&mut self, text: impl Into<String>, kind: NoteKind) {
         let text = text.into();
         match kind {
-            NoteKind::Err => crate::log_error!("note: {text}"),
-            NoteKind::Warn => crate::log_warn!("note: {text}"),
+            NoteKind::Err => log_error!("note: {text}"),
+            NoteKind::Warn => log_warn!("note: {text}"),
             NoteKind::Ok => log_info!("note: {text}"),
         }
         self.notes.insert(
@@ -571,6 +571,7 @@ impl eframe::App for App {
 // ---------------------------------------------------------------- painting --
 
 use crate::theme::{accent, card_bg, err_color, ok_color, surface, surface_stroke, warn_color};
+use crate::log::{log_debug, log_error, log_info, log_warn};
 
 /// How long a queued job may take before the UI stops waiting and unlocks.
 ///

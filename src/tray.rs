@@ -54,11 +54,12 @@ impl Tray {
         out
     }
 
-    /// Refreshes the icon and tooltip to reflect the current mode.
+    /// Refreshes the tooltip to reflect the current mode.
+    ///
+    /// The icon itself is mode-independent now - it is a flat violet plate - so
+    /// there is nothing to redraw here. The mode is still announced by the
+    /// tooltip, which is where a user actually looks.
     pub fn set_mode(&self, mode: Mode) {
-        if let Some(i) = icon::tray_icon(mode) {
-            self.icon.set_icon(Some(i));
-        }
         self.icon
             .set_tooltip(Some(format!("XMG Optimizer - {}", mode.label())));
     }
@@ -92,7 +93,7 @@ pub fn build(mode: Mode, on_ac: bool) -> Option<Tray> {
     menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
 
-    let icon_handle = icon::tray_icon(mode)?;
+    let icon_handle = icon::tray_icon()?;
 
     let built = TrayIconBuilder::new()
         .with_menu(Box::new(menu))

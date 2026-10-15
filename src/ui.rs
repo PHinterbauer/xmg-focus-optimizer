@@ -335,20 +335,18 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
 
         // --- theme ---------------------------------------------------------
+        //
+        // Both palettes are installed every time, and the preference is set
+        // afterwards. Doing it this way means "System" resolves to whichever of
+        // ours the OS asked for, instead of falling back to egui's stock look.
         if self.theme_applied != Some(self.settings.theme) || !self.style_pushed {
-            match self.settings.theme {
-                Theme::System => {
-                    ctx.set_theme(egui::ThemePreference::System);
-                }
-                Theme::Light => {
-                    ctx.set_visuals_of(egui::Theme::Light, egui::Visuals::light());
-                    ctx.set_theme(egui::ThemePreference::Light);
-                }
-                Theme::Dark => {
-                    ctx.set_visuals_of(egui::Theme::Dark, egui::Visuals::dark());
-                    ctx.set_theme(egui::ThemePreference::Dark);
-                }
-            }
+            ctx.set_visuals_of(egui::Theme::Light, crate::theme::visuals(false));
+            ctx.set_visuals_of(egui::Theme::Dark, crate::theme::visuals(true));
+            ctx.set_theme(match self.settings.theme {
+                Theme::System => egui::ThemePreference::System,
+                Theme::Light => egui::ThemePreference::Light,
+                Theme::Dark => egui::ThemePreference::Dark,
+            });
             self.theme_applied = Some(self.settings.theme);
             self.style_pushed = true;
         }
@@ -366,7 +364,7 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::Image::new(&icon::texture(ui.ctx(), self.settings.mode))
+                        egui::Image::new(&icon::texture(ui.ctx()))
                             .fit_to_exact_size(Vec2::new(24.0, 24.0)),
                     );
                     ui.label(RichText::new("XMG Optimizer").size(15.0).strong());
@@ -456,8 +454,8 @@ impl eframe::App for App {
                         for n in self.notes.iter().rev() {
                             let c = match n.kind {
                                 NoteKind::Ok => visuals.weak_text_color(),
-                                NoteKind::Warn => egui::Color32::from_rgb(220, 160, 40),
-                                NoteKind::Err => egui::Color32::from_rgb(226, 80, 80),
+                                NoteKind::Warn => warn_color(),
+                                NoteKind::Err => err_color(),
                             };
                             ui.label(
                                 RichText::new(format!("{}  {}", n.stamp, n.text))
@@ -486,14 +484,7 @@ impl eframe::App for App {
 
 // ---------------------------------------------------------------- painting --
 
-fn accent(mode: Mode, dark: bool) -> egui::Color32 {
-    match (mode, dark) {
-        (Mode::Quiet, true) => egui::Color32::from_rgb(56, 189, 248),
-        (Mode::Quiet, false) => egui::Color32::from_rgb(29, 78, 216),
-        (Mode::Performance, true) => egui::Color32::from_rgb(251, 146, 60),
-        (Mode::Performance, false) => egui::Color32::from_rgb(194, 65, 12),
-    }
-}
+use crate::theme::{accent, card_bg, err_color, ok_color, surface, surface_stroke, warn_color};
 
 fn card<R>(
     ui: &mut egui::Ui,
@@ -504,12 +495,14 @@ fn card<R>(
     let dark = ui.visuals().dark_mode;
     let (fill, stroke) = if selected {
         (
-            egui::Color32::from_black_alpha(if dark { 60 } else { 16 }),
+            tone.gamma_multiply(if dark { 0.22 } else { 0.10 }),
             Stroke::new(1.5, tone),
         )
     } else {
+        // Cards sit a step above the panel rather than being the same colour,
+        // so they read as raised even in a flat theme.
         (
-            ui.visuals().panel_fill,
+            card_bg(dark),
             Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
         )
     };
@@ -536,11 +529,7 @@ fn section(ui: &mut egui::Ui, title: &str) {
 }
 
 fn pill(ui: &mut egui::Ui, text: &str, good: bool) {
-    let c = if good {
-        egui::Color32::from_rgb(34, 160, 90)
-    } else {
-        egui::Color32::from_rgb(190, 140, 20)
-    };
+    let c = if good { ok_color() } else { warn_color() };
     egui::Frame::new()
         .fill(c.gamma_multiply(0.18))
         .corner_radius(CornerRadius::same(20))
@@ -565,7 +554,7 @@ impl App {
                 let clicked = card(&mut cols[i], selected, tone, |ui| {
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::Image::new(&icon::texture(ui.ctx(), *mode))
+                            egui::Image::new(&icon::texture(ui.ctx()))
                                 .fit_to_exact_size(Vec2::new(28.0, 28.0)),
                         );
                         ui.vertical(|ui| {
@@ -654,15 +643,14 @@ impl App {
 
         section(ui, "Consistency check");
 
+        // The drift report is a status, so it keeps semantic colours: violet when the
+        // scheme is ours and consistent, amber when something disagrees.
         let (bg, tint) = if clean && managed {
-            (
-                egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.16 } else { 0.10 }),
-                egui::Color32::from_rgb(34, 160, 90),
-            )
+            (surface(dark), accent(Mode::Quiet, dark))
         } else {
             (
-                egui::Color32::from_rgb(210, 150, 30).gamma_multiply(if dark { 0.16 } else { 0.10 }),
-                egui::Color32::from_rgb(215, 155, 35),
+                warn_color().gamma_multiply(if dark { 0.16 } else { 0.10 }),
+                warn_color(),
             )
         };
 
@@ -821,9 +809,8 @@ impl App {
     fn safety_panel(&self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         egui::Frame::new()
-            .fill(
-                egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.16 } else { 0.10 }),
-            )
+            .fill(surface(dark))
+            .stroke(Stroke::new(1.0, surface_stroke(dark)))
             .corner_radius(CornerRadius::same(10))
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -852,9 +839,8 @@ impl App {
         ui.add_space(4.0);
 
         egui::Frame::new()
-            .fill(
-                egui::Color32::from_rgb(34, 150, 90).gamma_multiply(if dark { 0.15 } else { 0.10 }),
-            )
+            .fill(surface(dark))
+            .stroke(Stroke::new(1.0, surface_stroke(dark)))
             .corner_radius(CornerRadius::same(10))
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -884,7 +870,7 @@ impl App {
         ui.add_space(12.0);
         section(ui, "Initial backup");
         ui.horizontal(|ui| {
-            card(ui, false, egui::Color32::from_rgb(34, 150, 90), |ui| {
+            card(ui, false, accent(Mode::Quiet, dark), |ui| {
                 if self.has_factory {
                     ui.label(RichText::new("Present").strong().size(15.0));
                     ui.label(
@@ -906,7 +892,7 @@ impl App {
                     });
                 }
             });
-            card(ui, false, egui::Color32::from_rgb(200, 140, 40), |ui| {
+            card(ui, false, warn_color(), |ui| {
                 ui.label(RichText::new("Create a new one").strong().size(15.0));
                 ui.label(
                     RichText::new("three confirmations required")
@@ -923,10 +909,8 @@ impl App {
         if self.confirm_stage > 0 {
             ui.add_space(8.0);
             egui::Frame::new()
-                .fill(
-                    egui::Color32::from_rgb(200, 120, 40)
-                        .gamma_multiply(if dark { 0.14 } else { 0.10 }),
-                )
+                .fill(warn_color().gamma_multiply(if dark { 0.14 } else { 0.10 }))
+                .stroke(Stroke::new(1.0, warn_color().gamma_multiply(0.45)))
                 .corner_radius(CornerRadius::same(10))
                 .inner_margin(12.0)
                 .show(ui, |ui| match self.confirm_stage {

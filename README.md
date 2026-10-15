@@ -1,6 +1,8 @@
 <div align="center">
 
-# XMG&nbsp;Focus&nbsp;Optimizer
+# 𝗫𝗠𝗚&nbsp;𝗙𝗼𝗰𝘂𝘀&nbsp;𝗢𝗽𝘁𝗶𝗺𝗶𝘇𝗲𝗿
+
+<sub>─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─</sub>
 
 ### Two safe performance modes for the SCHENKER XMG FOCUS 15
 

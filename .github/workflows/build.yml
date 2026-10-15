@@ -45,6 +45,25 @@ jobs:
           Copy-Item target/release/xmg-optimizer.exe dist/XMG-Optimizer.exe
           $f = Get-Item dist/XMG-Optimizer.exe
           "{0:N2} MB" -f ($f.Length / 1MB) | Write-Host
+
+      # Sign only when a certificate is configured. Without the secrets this
+      # step is a no-op, so an unsigned build still succeeds and local
+      # development is unaffected. See SIGNING.md.
+      - name: Sign
+        shell: pwsh
+        env:
+          XMG_SIGN_PFX_PATH: ${{ secrets.XMG_SIGN_PFX_PATH }}
+          XMG_SIGN_PFX_PASSWORD: ${{ secrets.XMG_SIGN_PFX_PASSWORD }}
+          XMG_SIGN_AZURE_ENDPOINT: ${{ secrets.XMG_SIGN_AZURE_ENDPOINT }}
+          XMG_SIGN_AZURE_CERT_PROFILE: ${{ secrets.XMG_SIGN_AZURE_CERT_PROFILE }}
+        run: ./sign-release.ps1 -ExePath ./dist/XMG-Optimizer.exe
+
+      # Re-check the file after signing. Signing rewrites the PE, so the
+      # resource check has to run again on the bytes that will actually ship.
+      - name: Verify resources survived signing
+        shell: pwsh
+        run: ./Verify-Release.ps1 -Path ./dist/XMG-Optimizer.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: XMG-Optimizer-windows

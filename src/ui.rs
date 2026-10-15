@@ -468,7 +468,9 @@ impl eframe::App for App {
         let tone = accent(self.settings.mode, dark);
 
         // --- navigation rail ------------------------------------------------
-        egui::SidePanel::left("nav")
+        // egui 0.36 collapsed SidePanel and TopBottomPanel into a single `Panel`
+        // with left/right/top/bottom constructors.
+        egui::Panel::left("nav")
             .exact_size(228.0)
             .resizable(false)
             .frame(
@@ -544,7 +546,7 @@ impl eframe::App for App {
             });
 
         // --- page header ----------------------------------------------------
-        egui::TopBottomPanel::top("header")
+        egui::Panel::top("header")
             .exact_size(64.0)
             .frame(
                 egui::Frame::new()
@@ -600,7 +602,7 @@ impl eframe::App for App {
         // One line, always visible, rather than a resizable log panel eating a
         // third of the window. The full history is on disk, and the newest line
         // is what matters while you are using it.
-        egui::TopBottomPanel::bottom("status")
+        egui::Panel::bottom("status")
             .exact_size(30.0)
             .frame(
                 egui::Frame::new()
@@ -806,7 +808,12 @@ fn panel_card<R>(
 }
 
 /// A labelled figure for the status strip and the profile cards.
-fn stat(ui: &mut egui::Ui, label: &str, value: &str, colour: egui::Color32) {
+///
+/// Takes `impl AsRef<str>` because the value is usually a `format!` result
+/// rather than a literal, and picking one at random would be worse than
+/// accepting both.
+fn stat(ui: &mut egui::Ui, label: &str, value: impl AsRef<str>, colour: egui::Color32) {
+    let value = value.as_ref();
     ui.vertical(|ui| {
         ui.label(
             RichText::new(label)
@@ -819,7 +826,8 @@ fn stat(ui: &mut egui::Ui, label: &str, value: &str, colour: egui::Color32) {
 }
 
 /// One figure inside a profile card. Smaller and quieter than [`stat`].
-fn figure(ui: &mut egui::Ui, label: &str, value: &str) {
+fn figure(ui: &mut egui::Ui, label: &str, value: impl AsRef<str>) {
+    let value = value.as_ref();
     ui.vertical(|ui| {
         ui.label(
             RichText::new(label)
@@ -961,10 +969,12 @@ impl App {
                     ui.add_space(12.0);
                     let p = profile::Params::for_mode(*mode, on_ac);
                     ui.columns(2, |c| {
-                        figure(c[0], "CPU cap", &format!("{}%", p.cpu_max));
-                        figure(c[1], "GPU limit", &format!("{} W", p.gpu_watts));
-                        figure(c[0], "Efficiency", &format!("{}", p.epp));
-                        figure(c[1], "Fans", p.fan_mode.label());
+                        // columns() hands the closure a `[Ui; N]`, so each cell is indexed by value
+                    // and has to be re-borrowed mutably.
+                    figure(&mut c[0], "CPU cap", format!("{}%", p.cpu_max));
+                        figure(&mut c[1], "GPU limit", format!("{} W", p.gpu_watts));
+                        figure(&mut c[0], "Efficiency", format!("{}", p.epp));
+                        figure(&mut c[1], "Fans", p.fan_mode.label());
                     });
                 });
                 if clicked && !selected {

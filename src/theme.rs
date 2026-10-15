@@ -76,7 +76,8 @@ pub fn apply_fonts(ctx: &egui::Context) {
         };
         fonts
             .font_data
-            .insert(name.to_owned(), egui::FontData::from_owned(bytes));
+            // FontDefinitions::font_data holds Arc<FontData>, not FontData.
+            .insert(name.to_owned(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
         loaded = true;
     }
 

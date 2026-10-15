@@ -216,7 +216,7 @@ mod tests {
         let w = s - pad * 2.0;
         let cx = pad + w / 2.0;
         let cy = pad + w / 2.0;
-        let r = deg.to_radians();
+        let r = (deg as f32).to_radians();
         let x = (cx + r.cos() * (w * RING)).round() as u32;
         let y = (cy + r.sin() * (w * RING)).round() as u32;
         let px = at(&buf, x, y);

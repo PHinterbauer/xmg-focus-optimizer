@@ -255,11 +255,14 @@ impl App {
 
     /// The theme actually in effect, resolving "System" against what egui
     /// settled on.
+    ///
+    /// egui 0.36 removed `Context::style`; `Context::theme` is the replacement
+    /// and reports the *resolved* theme, System preference included.
     fn is_dark(&self) -> bool {
         match self.settings.theme {
             Theme::Light => false,
             Theme::Dark => true,
-            Theme::System => self.ctx.style().visuals.dark_mode,
+            Theme::System => self.ctx.theme() == egui::Theme::Dark,
         }
     }
 

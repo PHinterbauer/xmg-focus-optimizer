@@ -387,13 +387,24 @@ mod tests {
         let rr = w * RING;
         let sw = w * STROKE;
 
-        // A short stretch of the centre line above the middle must be white.
+        // A short stretch of the centre line above the middle must be glyph.
         let from = cy - rr - sw * 0.62;
         for step in 0..8 {
             let y = (from + step as f32 * 0.5).round() as u32;
             assert!(
-                is_glyph(at(&buf, cx, y)),
+                is_glyph(at(&buf, cx, y), Variant::Dark),
                 "no stem at y={y}; the symbol is malformed"
+            );
+        }
+
+        // And the same must hold for the light variant, where the stem is
+        // violet rather than white.
+        let light = draw(256, Variant::Light);
+        for step in 0..8 {
+            let y = (from + step as f32 * 0.5).round() as u32;
+            assert!(
+                is_glyph(at(&light, cx, y), Variant::Light),
+                "no stem in the light variant at y={y}"
             );
         }
     }

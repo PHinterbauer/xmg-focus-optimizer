@@ -213,6 +213,7 @@ a background task once so the common case never prompts."
 }
 
 fn run_gui(start_hidden: bool, autostarted: bool) {
+    log_info!("GUI launching (hidden={start_hidden}, autostart={autostarted})");
     // Only one instance at a time. A second launch just reveals the first.
     let _guard = match sysutil::acquire_single_instance(MUTEX_NAME) {
         Ok(g) => g,
@@ -232,11 +233,17 @@ fn run_gui(start_hidden: bool, autostarted: bool) {
 
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("XMG Optimizer")
-            .with_inner_size([860.0, 720.0])
-            .with_min_inner_size([660.0, 580.0])
-            .with_decorations(false)
-            .with_resizable(true),
+            .with_title("XMG Focus Optimizer")
+            .with_inner_size([1040.0, 760.0])
+            .with_min_inner_size([820.0, 620.0])
+            // Real Windows decorations. The previous build drew its own title
+            // bar with hand-made minimise and close buttons plus a manual drag
+            // region, which does not snap to edges, breaks at non-100% DPI
+            // scaling, and is the single clearest thing that made the app look
+            // like a web page in a box rather than a program.
+            .with_decorations(true)
+            .with_resizable(true)
+            .with_app_id("xmg-focus-optimizer"),
         ..Default::default()
     };
 

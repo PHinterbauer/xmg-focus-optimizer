@@ -46,6 +46,79 @@ const L_STROKE: Color32 = Color32::from_rgb(219, 219, 226);
 const L_TEXT: Color32 = Color32::from_rgb(17, 17, 20);
 const L_WEAK_TEXT: Color32 = Color32::from_rgb(105, 105, 118);
 
+// ------------------------------------------------------------------ fonts --
+
+/// Points egui at a Windows UI font.
+///
+/// egui ships Ubuntu-Light as its default. It is a perfectly good font, but it
+/// is a Linux font, and on Windows it is the single biggest reason an egui
+/// window looks like a prototype: the letterforms do not match anything else
+/// on the screen. Loading Segoe UI costs one file read and makes the whole app
+/// look like it belongs on this machine.
+pub fn apply_fonts(ctx: &egui::Context) {
+    const CANDIDATES: &[&str] = &[
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\segoeuib.ttf", // bold
+        "C:\\Windows\\Fonts\\seguisb.ttf",  // semibold
+    ];
+
+    let mut fonts = egui::FontDefinitions::default();
+    let mut loaded = false;
+
+    for (i, path) in CANDIDATES.iter().enumerate() {
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
+        let name = match i {
+            0 => "segoe",
+            1 => "segoe-bold",
+            _ => "segoe-semibold",
+        };
+        fonts
+            .font_data
+            .insert(name.to_owned(), egui::FontData::from_owned(bytes));
+        loaded = true;
+    }
+
+    if !loaded {
+        log_warn!("no system UI font found; falling back to egui's built-in default");
+        return;
+    }
+
+    for family in [
+        egui::FontFamily::Proportional,
+        egui::FontFamily::Monospace,
+    ] {
+        let list = fonts.families.entry(family).or_default();
+        list.insert(0, "segoe".to_owned());
+        list.insert(1, "segoe-semibold".to_owned());
+        list.insert(2, "segoe-bold".to_owned());
+    }
+
+    ctx.set_fonts(fonts);
+    log_info!("using the system UI font for all text");
+}
+
+/// A slightly tighter, more deliberate type scale than the egui defaults,
+/// which are tuned for dense debug overlays rather than a settings window.
+///
+/// Applied to both themes at once. egui 0.36 removed `Context::style()`, so the
+/// only way to reach every style is `all_styles_mut`.
+pub fn apply_spacing(ctx: &egui::Context) {
+    ctx.all_styles_mut(|style| {
+        let s = &mut style.spacing;
+        s.item_spacing = egui::vec2(10.0, 9.0);
+        s.button_padding = egui::vec2(14.0, 8.0);
+        s.window_margin = egui::Margin::same(18);
+        s.interact_size = egui::vec2(44.0, 34.0);
+        s.menu_margin = egui::Margin::same(10);
+        s.slider_width = 180.0;
+        s.scroll.bar_width = 9.0;
+        s.scroll.floating_allocated_width = 11.0;
+    });
+    log_debug!("spacing applied to both themes");
+}
+
 // ---------------------------------------------------------------- roles ---
 
 /// Relative luminance, used by the contrast assertions in the tests.

@@ -34,6 +34,27 @@ enum Tab {
     Settings,
 }
 
+impl Tab {
+    /// Heading shown at the top of the page.
+    fn title(self) -> &'static str {
+        match self {
+            Tab::Dashboard => "Dashboard",
+            Tab::Backups => "Backups",
+            Tab::Settings => "Settings",
+        }
+    }
+
+    /// One line under the heading, so the page explains itself before you read
+    /// anything.
+    fn blurb(self) -> &'static str {
+        match self {
+            Tab::Dashboard => "Pick a profile, or let the charger decide.",
+            Tab::Backups => "Every change is snapshotted before it happens.",
+            Tab::Settings => "How the app behaves, and how it looks.",
+        }
+    }
+}
+
 struct Note {
     text: String,
     kind: NoteKind,
@@ -421,6 +442,8 @@ impl eframe::App for App {
         // afterwards. Doing it this way means "System" resolves to whichever of
         // ours the OS asked for, instead of falling back to egui's stock look.
         if self.theme_applied != Some(self.settings.theme) || !self.style_pushed {
+            crate::theme::apply_fonts(&ctx);
+            crate::theme::apply_spacing(&ctx);
             ctx.set_visuals_of(egui::Theme::Light, crate::theme::visuals(false));
             ctx.set_visuals_of(egui::Theme::Dark, crate::theme::visuals(true));
             ctx.set_theme(match self.settings.theme {
@@ -444,121 +467,190 @@ impl eframe::App for App {
         let dark = visuals.dark_mode;
         let tone = accent(self.settings.mode, dark);
 
-        // --- title bar -----------------------------------------------------
-        egui::Panel::top("titlebar")
-            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(8.0))
+        // --- navigation rail ------------------------------------------------
+        egui::SidePanel::left("nav")
+            .exact_size(228.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(if dark { 255 } else { 250 }))
+                    .inner_margin(Margin::symmetric(14, 16))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    )),
+            )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::Image::new(&icon::texture(ui.ctx(), dark))
-                            .fit_to_exact_size(Vec2::new(24.0, 24.0)),
+                            .fit_to_exact_size(Vec2::new(30.0, 30.0)),
                     );
-                    ui.label(RichText::new("XMG Optimizer").size(15.0).strong());
-                    ui.add_space(8.0);
-                    pill(
-                        ui,
-                        if self.on_ac { "mains power" } else { "on battery" },
-                        self.on_ac,
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("XMG Focus").size(15.0).strong());
+                        ui.label(
+                            RichText::new("Optimizer")
+                                .size(15.0)
+                                .strong()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    });
+                });
+
+                ui.add_space(18.0);
+                nav_label(ui, "MODES");
+                for (t, label, hint) in [
+                    (Tab::Dashboard, "Dashboard", "Quiet and Performance"),
+                    (Tab::Backups, "Backups", "Snapshots and restore"),
+                    (Tab::Settings, "Settings", "Behaviour and appearance"),
+                ] {
+                    if nav_item(ui, self.tab == t, label, hint, tone) {
+                        self.tab = t;
+                    }
+                    ui.add_space(3.0);
+                }
+
+                // Everything else is pushed to the bottom of the rail, which
+                // is what makes the rail read as navigation rather than as a
+                // panel of controls.
+                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                    ui.add_space(10.0);
+                    if ui.button("Quit").clicked() {
+                        self.stop_watch.store(true, Ordering::Relaxed);
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("Hide to tray").clicked() {
+                        self.hide_to_tray();
+                    }
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new("v1.0.2")
+                            .size(11.5)
+                            .color(ui.visuals().weak_text_color()),
                     );
+                    // `on_hover_text` lives on the Response, not on
+                    // RichText - it has to be attached after the label is
+                    // built, which is also when there is a rect to point at.
+                    ui.label(
+                        RichText::new(crate::paths::log_path().display().to_string())
+                            .size(10.0)
+                            .color(ui.visuals().weak_text_color()),
+                    )
+                    .on_hover_text(
+                        "The log records every action and every command this app runs. \
+                         Attach it to a bug report.",
+                    );
+                });
+            });
+
+        // --- page header ----------------------------------------------------
+        egui::TopBottomPanel::top("header")
+            .exact_size(64.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(Margin::symmetric(20, 10))
+                    .stroke(egui::Stroke::new(
+                        0.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    )),
+            )
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(self.tab.title())
+                            .size(21.0)
+                            .strong()
+                            .color(ui.visuals().text_color()),
+                    );
+                    ui.label(
+                        RichText::new(self.tab.blurb())
+                            .size(12.5)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if self.busy {
                         ui.spinner();
                     }
-
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("x").on_hover_text("Close to tray").clicked() {
-                            self.hide_to_tray();
-                        }
-                        if ui.button("-").on_hover_text("Minimise").clicked() {
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                        }
-                        let (_, resp) =
-                            ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
-                        if resp.dragged() {
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                        }
-                    });
-                });
-            });
-
-        // --- tabs ----------------------------------------------------------
-        egui::Panel::top("tabs")
-            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(6.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for (t, label) in [
-                        (Tab::Dashboard, "Dashboard"),
-                        (Tab::Backups, "Backups"),
-                        (Tab::Settings, "Settings"),
-                    ] {
-                        let sel = self.tab == t;
-                        let c = if sel {
-                            tone
-                        } else {
-                            visuals.weak_text_color()
-                        };
-                        let resp = ui.add(
-                            egui::Button::new(RichText::new(label).color(c).size(13.0))
-                                .fill(if sel {
-                                    tone.gamma_multiply(0.14)
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                })
-                                .corner_radius(CornerRadius::same(8))
-                                .min_size(Vec2::new(96.0, 30.0)),
-                        );
-                        if resp.clicked() {
-                            self.tab = t;
+                    if self.on_ac {
+                        pill(ui, "Mains power", true);
+                    } else {
+                        pill(ui, "On battery", false);
+                    }
+                    if self.elevated_ready {
+                        pill(ui, "Background task ready", true);
+                    } else if ui.button("Finish setup").clicked() {
+                        match elevate::ensure_setup() {
+                            Ok(true) => {
+                                self.elevated_ready = true;
+                                self.note("background task registered", NoteKind::Ok);
+                            }
+                            Ok(false) => self.note("setup incomplete", NoteKind::Warn),
+                            Err(e) => self.note(e, NoteKind::Err),
                         }
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if self.elevated_ready {
-                            pill(ui, "background task ready", true);
-                        } else if ui.button("Finish setup").clicked() {
-                            match elevate::ensure_setup() {
-                                Ok(true) => {
-                                    self.elevated_ready = true;
-                                    self.note("background task registered", NoteKind::Ok);
-                                }
-                                Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                                Err(e) => self.note(e, NoteKind::Err),
-                            }
-                        }
-                    });
+                    ui.add_space(4.0);
                 });
             });
 
-        // --- body ----------------------------------------------------------
-        egui::Panel::bottom("log")
-            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(8.0))
-            .resizable(true)
-            .default_size(120.0)
+        // --- status bar -----------------------------------------------------
+        //
+        // One line, always visible, rather than a resizable log panel eating a
+        // third of the window. The full history is on disk, and the newest line
+        // is what matters while you are using it.
+        egui::TopBottomPanel::bottom("status")
+            .exact_size(30.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(if dark { 255 } else { 246 }))
+                    .inner_margin(Margin::symmetric(20, 6))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    )),
+            )
             .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        for n in self.notes.iter().rev() {
-                            let c = match n.kind {
-                                NoteKind::Ok => visuals.weak_text_color(),
-                                NoteKind::Warn => warn_color(),
-                                NoteKind::Err => err_color(),
-                            };
-                            ui.label(
-                                RichText::new(format!("{}  {}", n.stamp, n.text))
-                                    .size(12.0)
-                                    .color(c)
-                                    .monospace(),
-                            );
-                        }
-                    });
+                if let Some(n) = self.notes.first() {
+                    let c = match n.kind {
+                        NoteKind::Ok => ui.visuals().weak_text_color(),
+                        NoteKind::Warn => warn_color(),
+                        NoteKind::Err => err_color(),
+                    };
+                    ui.label(
+                        RichText::new(format!("{}   {}", n.stamp, n.text))
+                            .size(11.5)
+                            .color(c),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new("Ready")
+                            .size(11.5)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(crate::paths::app_data_dir().display().to_string())
+                            .size(10.5)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
             });
 
+        // --- page content ---------------------------------------------------
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(visuals.panel_fill).inner_margin(12.0))
-            .show(ui, |ui| match self.tab {
-                Tab::Dashboard => self.dashboard(ui),
-                Tab::Backups => self.backups(ui),
-                Tab::Settings => self.settings_tab(ui),
+            .frame(egui::Frame::new().fill(ui.visuals().panel_fill).inner_margin(20.0))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    match self.tab {
+                        Tab::Dashboard => self.dashboard(ui),
+                        Tab::Backups => self.backups(ui),
+                        Tab::Settings => self.settings_tab(ui),
+                    }
+                });
             });
     }
 
@@ -569,6 +661,87 @@ impl eframe::App for App {
 }
 
 // ---------------------------------------------------------------- painting --
+
+/// A small tracked heading above a group in the navigation rail.
+fn nav_label(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        RichText::new(text)
+            .size(10.5)
+            .strong()
+            .color(ui.visuals().weak_text_color()),
+    );
+    ui.add_space(4.0);
+}
+
+/// One row of the navigation rail.
+///
+/// Drawn as a button rather than a label so the whole row is the hit target -
+/// a 20 pixel line of text is not something to aim at. The active row is
+/// filled, outlined, and given a violet bar down its left edge, so the eye
+/// finds it without having to read it.
+fn nav_item(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: &str,
+    hint: &str,
+    tone: egui::Color32,
+) -> bool {
+    let dark = ui.visuals().dark_mode;
+    let text_c = if selected {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+
+    let clicked = ui
+        .horizontal(|ui| {
+            // The marker bar is allocated, not painted, so it reserves its
+            // space whether or not it is shown and the rows stay aligned.
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(3.0, 26.0), egui::Sense::hover());
+            if selected {
+                ui.painter()
+                    .rect_filled(rect.expand(1.0), CornerRadius::same(2), tone);
+            }
+
+            // egui 0.36 has no RichText::on_hover_color, so the unselected rows are
+            // already drawn in a mid-grey that stays legible on both the resting
+            // and the hovered button fill.
+            ui.add(
+                egui::Button::new(
+                    egui::RichText::new(label)
+                        .size(13.5)
+                        .strong()
+                        .color(text_c),
+                )
+                .fill(if selected {
+                    tone.gamma_multiply(if dark { 0.26 } else { 0.10 })
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .stroke(if selected {
+                    egui::Stroke::new(1.0, tone.gamma_multiply(0.5))
+                } else {
+                    egui::Stroke::NONE
+                })
+                .corner_radius(CornerRadius::same(8))
+                .min_size(Vec2::new(ui.available_width(), 26.0)),
+            )
+            .clicked()
+        })
+        .inner;
+
+    // Only the active row carries a hint, so the rail stays short enough to
+    // read at a glance instead of becoming a wall of text.
+    if selected {
+        ui.label(
+            egui::RichText::new(hint)
+                .size(10.5)
+                .color(ui.visuals().weak_text_color()),
+        );
+    }
+
+    clicked
+}
 
 use crate::theme::{accent, card_bg, err_color, ok_color, surface, surface_stroke, warn_color};
 use crate::log::{log_debug, log_error, log_info, log_warn};
@@ -632,6 +805,36 @@ fn panel_card<R>(
         .show(ui, add_contents);
 }
 
+/// A labelled figure for the status strip and the profile cards.
+fn stat(ui: &mut egui::Ui, label: &str, value: &str, colour: egui::Color32) {
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(label)
+                .size(10.0)
+                .strong()
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.label(RichText::new(value).size(16.0).strong().color(colour));
+    });
+}
+
+/// One figure inside a profile card. Smaller and quieter than [`stat`].
+fn figure(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(label)
+                .size(10.5)
+                .color(ui.visuals().weak_text_color()),
+        );
+        ui.label(
+            RichText::new(value)
+                .size(14.0)
+                .strong()
+                .color(ui.visuals().text_color()),
+        );
+    });
+}
+
 fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(6.0);
     ui.label(
@@ -661,6 +864,62 @@ impl App {
         let dark = ui.visuals().dark_mode;
         let on_ac = self.on_ac;
 
+        // --- the one thing worth knowing at a glance -----------------------
+        //
+        // A row of figures rather than a sentence: what mode is live, what the
+        // laptop is doing, and whether the settings on disk match it.
+        let (consistent, drifted, total, scheme) = match &self.drift {
+            Some(d) => (
+                d.drifted() == 0,
+                d.drifted(),
+                d.total(),
+                d.scheme_name.clone(),
+            ),
+            None => (false, 0, 0, String::new()),
+        };
+
+        panel_card(ui, accent(self.settings.mode, dark), |ui| {
+            ui.horizontal(|ui| {
+                stat(
+                    ui,
+                    "ACTIVE MODE",
+                    self.settings.mode.label(),
+                    accent(self.settings.mode, dark),
+                );
+                ui.add_space(28.0);
+                stat(
+                    ui,
+                    "POWER SOURCE",
+                    if on_ac { "Mains" } else { "Battery" },
+                    if on_ac { ok_color() } else { warn_color() },
+                );
+                ui.add_space(28.0);
+                stat(
+                    ui,
+                    "SETTINGS",
+                    if consistent {
+                        "Up to date".to_string()
+                    } else if total > 0 {
+                        format!("{drifted} of {total} differ")
+                    } else {
+                        "Checking".into()
+                    },
+                    if consistent { ok_color() } else { warn_color() },
+                );
+                ui.add_space(28.0);
+                stat(ui, "POWER SCHEME", scheme, ui.visuals().weak_text_color());
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Check settings").clicked() {
+                        self.recheck_drift();
+                    }
+                });
+            });
+        });
+
+        ui.add_space(18.0);
+        section(ui, "Profiles");
+
         ui.columns(2, |cols| {
             for (i, mode) in [Mode::Quiet, Mode::Performance].iter().enumerate() {
                 let selected = self.settings.mode == *mode;
@@ -670,10 +929,20 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::Image::new(&icon::texture(ui.ctx(), dark))
-                                .fit_to_exact_size(Vec2::new(28.0, 28.0)),
+                                .fit_to_exact_size(Vec2::new(30.0, 30.0)),
                         );
                         ui.vertical(|ui| {
-                            ui.label(RichText::new(mode.label()).size(19.0).strong());
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(mode.label()).size(19.0).strong());
+                                if selected {
+                                    ui.label(
+                                        RichText::new("ACTIVE")
+                                            .size(9.5)
+                                            .strong()
+                                            .color(tone),
+                                    );
+                                }
+                            });
                             ui.label(
                                 RichText::new(mode.tagline())
                                     .size(12.0)
@@ -681,25 +950,22 @@ impl App {
                             );
                         });
                     });
-                    ui.add_space(8.0);
+
+                    ui.add_space(10.0);
                     ui.label(
                         RichText::new(mode.blurb())
                             .size(12.5)
                             .color(ui.visuals().weak_text_color()),
                     );
-                    ui.add_space(10.0);
+
+                    ui.add_space(12.0);
                     let p = profile::Params::for_mode(*mode, on_ac);
-                    ui.label(
-                        RichText::new(format!(
-                            "CPU cap {}%   \u{2022}   efficiency {}   \u{2022}   GPU {} W\nFans {}   \u{2022}   noiseless {}",
-                            p.cpu_max,
-                            p.epp,
-                            p.gpu_watts,
-                            p.fan_mode.label(),
-                            if p.noiseless { "on" } else { "off" }
-                        ))
-                        .size(12.0),
-                    );
+                    ui.columns(2, |c| {
+                        figure(c[0], "CPU cap", &format!("{}%", p.cpu_max));
+                        figure(c[1], "GPU limit", &format!("{} W", p.gpu_watts));
+                        figure(c[0], "Efficiency", &format!("{}", p.epp));
+                        figure(c[1], "Fans", p.fan_mode.label());
+                    });
                 });
                 if clicked && !selected {
                     self.settings.mode = *mode;
@@ -713,26 +979,23 @@ impl App {
             }
         });
 
-        ui.add_space(12.0);
+        ui.add_space(16.0);
         ui.horizontal(|ui| {
             if ui
                 .add(
                     egui::Button::new(
                         RichText::new(format!("Apply {}", self.settings.mode.label()))
-                            .size(14.0)
+                            .size(14.5)
                             .strong()
                             .color(egui::Color32::WHITE),
                     )
                     .fill(accent(self.settings.mode, dark))
-                    .corner_radius(CornerRadius::same(10))
-                    .min_size(Vec2::new(190.0, 40.0)),
+                    .corner_radius(CornerRadius::same(9))
+                    .min_size(Vec2::new(200.0, 42.0)),
                 )
                 .clicked()
             {
                 self.apply_current_mode();
-            }
-            if ui.button("Check settings").clicked() {
-                self.recheck_drift();
             }
         });
 

@@ -15,7 +15,6 @@
 //! The log lives next to the config, not next to the executable:
 //! `%LOCALAPPDATA%\XMG-Optimizer\xmg-optimizer.log`
 
-use std::fmt::Arguments;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -90,7 +89,7 @@ pub fn init() {
     if let Ok(mut g) = sink().lock() {
         *g = f;
     }
-    write(Level::Info, "--- session start ---", &[]);
+    write(Level::Info, "--- session start ---");
 }
 
 fn set_level_from_file() {
@@ -106,18 +105,13 @@ pub fn enabled(level: Level) -> bool {
     (level as u8) <= LEVEL.load(Ordering::Relaxed)
 }
 
-fn write(level: Level, msg: &str, args: &Arguments<'_>) {
-    let line = if args.is_empty() {
-        format!("[{}] {}  {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"), level.tag(), msg)
-    } else {
-        format!(
-            "[{}] {}  {}{}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-            level.tag(),
-            msg,
-            args
-        )
-    };
+fn write(level: Level, msg: &str) {
+    let line = format!(
+        "[{}] {}  {}",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+        level.tag(),
+        msg
+    );
     // stderr as well, so a `--tray` launch still leaves a trace somewhere
     // visible when debugging from a terminal.
     eprintln!("{line}");
@@ -129,23 +123,14 @@ fn write(level: Level, msg: &str, args: &Arguments<'_>) {
     }
 }
 
-/// Writes one line. The `$($arg)*` tail is optional and appended verbatim.
-#[macro_export]
-macro_rules! log_at {
-    ($lvl:expr, $($arg:tt)*) => {
-        $crate::log::emit($lvl, format!($($arg)*))
-    };
-}
-
+/// Writes one line at the given level. Used by the macros below and by
+/// [`command`]; takes the message already formatted so that multi-line
+/// messages (a failed command's stderr, say) stay intact.
 pub fn emit(level: Level, msg: String) {
     if !enabled(level) {
         return;
     }
-    // Split the first line off as the format string so it reads naturally.
-    let mut it = msg.splitn(2, '\n');
-    let head = it.next().unwrap_or("").to_string();
-    let tail = it.next().map(|t| format!("\n{}", t)).unwrap_or_default();
-    write(level, &head, &format_args!("{}", tail));
+    write(level, &msg);
 }
 
 #[macro_export]

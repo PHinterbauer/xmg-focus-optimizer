@@ -249,7 +249,17 @@ impl App {
 
     fn ensure_tray(&mut self) {
         if self.tray.is_none() {
-            self.tray = tray::build(self.settings.mode, self.on_ac);
+            self.tray = tray::build(self.settings.mode, self.on_ac, self.is_dark());
+        }
+    }
+
+    /// The theme actually in effect, resolving "System" against what egui
+    /// settled on.
+    fn is_dark(&self) -> bool {
+        match self.settings.theme {
+            Theme::Light => false,
+            Theme::Dark => true,
+            Theme::System => self.ctx.style().visuals.dark_mode,
         }
     }
 
@@ -349,6 +359,11 @@ impl eframe::App for App {
             });
             self.theme_applied = Some(self.settings.theme);
             self.style_pushed = true;
+            // The tray icon follows the theme, and it is the only app icon that
+            // can change at runtime.
+            if let Some(tray) = self.tray.as_ref() {
+                tray.set_dark(self.is_dark());
+            }
         }
 
         self.poll_events();
@@ -364,7 +379,7 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::Image::new(&icon::texture(ui.ctx()))
+                        egui::Image::new(&icon::texture(ui.ctx(), dark))
                             .fit_to_exact_size(Vec2::new(24.0, 24.0)),
                     );
                     ui.label(RichText::new("XMG Optimizer").size(15.0).strong());
@@ -554,7 +569,7 @@ impl App {
                 let clicked = card(&mut cols[i], selected, tone, |ui| {
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::Image::new(&icon::texture(ui.ctx()))
+                            egui::Image::new(&icon::texture(ui.ctx(), dark))
                                 .fit_to_exact_size(Vec2::new(28.0, 28.0)),
                         );
                         ui.vertical(|ui| {

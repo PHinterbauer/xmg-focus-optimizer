@@ -5,6 +5,11 @@
 //! Depth effects that look good at 256 px turn to mud at 16 px, which is the
 //! size that matters most in the notification area.
 //!
+//! Two variants, so the tray and the in-window logo follow the theme. The icon
+//! compiled into the executable by `build.rs` cannot: it is a build-time
+//! resource, and Explorer, the Start menu and a pinned taskbar button all read
+//! it from the file rather than from the running process.
+//!
 //! This must stay in step with `assets/New-Icon.ps1`, which draws the same
 //! geometry at 1024 px and writes `assets/app.ico`. The angles below are in the
 //! same convention GDI+ uses - degrees clockwise from 3 o'clock, y pointing
@@ -15,20 +20,55 @@
 
 // ------------------------------------------------------------- geometry ---
 
+/// The two looks the icon comes in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Variant {
+    /// Violet plate, white glyph. For a dark taskbar, and the one baked into
+    /// `assets/app.ico`.
+    Dark,
+    /// White plate, violet glyph, violet outline. For a light taskbar.
+    ///
+    /// The outline is not decoration. A plain white plate would disappear
+    /// completely against a white taskbar or a light window title bar, which is
+    /// exactly where this variant is used.
+    Light,
+}
+
+impl Variant {
+    /// The plate fill.
+    fn plate(self) -> [u8; 3] {
+        match self {
+            Variant::Dark => VIOLET,
+            Variant::Light => [255, 255, 255],
+        }
+    }
+
+    /// The power symbol, and the light variant's outline.
+    fn glyph(self) -> [u8; 3] {
+        match self {
+            Variant::Dark => [255, 255, 255],
+            Variant::Light => VIOLET,
+        }
+    }
+}
+
 struct Rgba {
     w: u32,
     h: u32,
     px: Vec<u8>, // straight alpha, RGBA
 }
 
-/// The plate. Deep violet - saturated enough to stay visible against a dark
-/// taskbar, bright enough to read against a light one. The white glyph on top
-/// of it is about 5.9:1 contrast.
-const PLATE: [u8; 3] = [109, 40, 217];
+/// The brand violet, and the plate colour in `assets/New-Icon.ps1`.
+const VIOLET: [u8; 3] = [109, 40, 217];
 
 /// Ring radius and stroke width, both as a fraction of the plate's side.
 const RING: f32 = 0.205;
 const STROKE: f32 = 0.090;
+
+/// Outline weight for [`Variant::Light`], as a fraction of the plate's radius.
+/// The absolute floor keeps it from thinning below a pixel at tray size.
+const OUTLINE: f32 = 0.075;
+const OUTLINE_MIN_PX: f32 = 1.0;
 
 /// The ring sweeps 270 degrees from -45, leaving a 90 degree gap centred on
 /// 270 degrees - straight up, which is where the stem is.
@@ -36,13 +76,16 @@ const ARC_START: f32 = -45.0;
 const ARC_SWEEP: f32 = 270.0;
 
 /// Renders the icon at `size` pixels.
-fn draw(size: u32) -> Rgba {
+fn draw(size: u32, variant: Variant) -> Rgba {
     let s = size as f32;
     let pad = s * 0.078;
     let w = s - pad * 2.0;
     let rad = (w / 2.0).max(0.001);
     let cx = pad + w / 2.0;
     let cy = pad + w / 2.0;
+    let plate = variant.plate();
+    let glyph = variant.glyph();
+    let outline_w = (rad * OUTLINE).max(OUTLINE_MIN_PX);
 
     let mut px = vec![0u8; (size * size * 4) as usize];
 
@@ -68,9 +111,24 @@ fn draw(size: u32) -> Rgba {
             // not look chewed at 16 px.
             let a = ((1.06 - q) / 0.06).clamp(0.0, 1.0);
             let i = ((y * size + x) * 4) as usize;
-            px[i] = PLATE[0];
-            px[i + 1] = PLATE[1];
-            px[i + 2] = PLATE[2];
+            let mut c = plate;
+            if variant == Variant::Light {
+                // q^(1/n) is 1 at the boundary and 0 at the centre, so
+                // rad * (1 - q^0.25) approximates distance inwards from the
+                // edge - good enough to lay an even border on a squircle.
+                let d = rad * (1.0 - q.clamp(0.0, 1.0).powf(0.25));
+                let o = (outline_w + 0.5 - d).clamp(0.0, 1.0);
+                if o > 0.0 {
+                    c = [
+                        lerp(c[0], glyph[0], o),
+                        lerp(c[1], glyph[1], o),
+                        lerp(c[2], glyph[2], o),
+                    ];
+                }
+            }
+            px[i] = c[0];
+            px[i + 1] = c[1];
+            px[i + 2] = c[2];
             px[i + 3] = (a * 255.0) as u8;
         }
     }
@@ -110,9 +168,9 @@ fn draw(size: u32) -> Rgba {
             }
             let i = ((y * size + x) * 4) as usize;
             let inv = 1.0 - g;
-            px[i] = (px[i] as f32 * inv + 255.0 * g) as u8;
-            px[i + 1] = (px[i + 1] as f32 * inv + 255.0 * g) as u8;
-            px[i + 2] = (px[i + 2] as f32 * inv + 255.0 * g) as u8;
+            px[i] = (px[i] as f32 * inv + glyph[0] as f32 * g) as u8;
+            px[i + 1] = (px[i + 1] as f32 * inv + glyph[1] as f32 * g) as u8;
+            px[i + 2] = (px[i + 2] as f32 * inv + glyph[2] as f32 * g) as u8;
             // Alpha is deliberately left alone: the glyph only ever lands on the
             // already-opaque plate, and painting the edge would give it a
             // visible dark fringe where it crosses the squircle outline.
@@ -120,6 +178,10 @@ fn draw(size: u32) -> Rgba {
     }
 
     Rgba { w: size, h: size, px }
+}
+
+fn lerp(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t.clamp(0.0, 1.0)).round() as u8
 }
 
 /// Widens `cover` with a round-capped disc of radius `r` centred at (cx, cy).
@@ -155,33 +217,47 @@ fn disc(cover: &mut [f32], size: u32, cx: f32, cy: f32, r: f32) {
 // Only the plain pixel data is cached globally. `tray_icon::Icon` wraps a raw
 // pointer and is deliberately neither Send nor Sync, so it can never live in a
 // `static`; it is rebuilt on demand instead, which costs nothing at this size.
+//
+// Two sets, one per variant. Each is drawn once and then reused, so switching
+// theme costs a single 64x64 render the first time and nothing after that.
 
 const ICON_PX: usize = 64;
 
-static RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-static TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
+static DARK_RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static LIGHT_RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static DARK_TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
+static LIGHT_TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
 
-/// Straight RGBA pixels for the icon, rendered once.
-pub fn rgba() -> &'static [u8] {
-    RGBA.get_or_init(|| draw(ICON_PX as u32).px)
+/// Straight RGBA pixels for the icon, rendered once per variant.
+pub fn rgba(variant: Variant) -> &'static [u8] {
+    match variant {
+        Variant::Dark => DARK_RGBA.get_or_init(|| draw(ICON_PX as u32, Variant::Dark).px),
+        Variant::Light => LIGHT_RGBA.get_or_init(|| draw(ICON_PX as u32, Variant::Light).px),
+    }
 }
 
-/// egui texture for use inside the window.
-pub fn texture(ctx: &egui::Context) -> egui::TextureHandle {
-    TEX.get_or_init(|| {
-        let img =
-            egui::ColorImage::from_rgba_unmultiplied([ICON_PX, ICON_PX], rgba());
-        ctx.load_texture("icon", img, egui::TextureOptions::LINEAR)
+/// egui texture for use inside the window, following the theme.
+pub fn texture(ctx: &egui::Context, dark: bool) -> egui::TextureHandle {
+    let (cell, name) = if dark {
+        (&DARK_TEX, "icon-dark")
+    } else {
+        (&LIGHT_TEX, "icon-light")
+    };
+    let variant = if dark { Variant::Dark } else { Variant::Light };
+    cell.get_or_init(|| {
+        let img = egui::ColorImage::from_rgba_unmultiplied([ICON_PX, ICON_PX], rgba(variant));
+        ctx.load_texture(name, img, egui::TextureOptions::LINEAR)
     })
     .clone()
 }
 
-/// Windows icon handle for the tray.
+/// Windows icon handle for the tray, following the theme.
 ///
 /// `None` only when the pixel data is rejected, which would indicate a bug in
 /// the drawing code rather than anything environmental.
-pub fn tray_icon() -> Option<tray_icon::Icon> {
-    tray_icon::Icon::from_rgba(rgba().to_vec(), ICON_PX as u32, ICON_PX as u32).ok()
+pub fn tray_icon(dark: bool) -> Option<tray_icon::Icon> {
+    let variant = if dark { Variant::Dark } else { Variant::Light };
+    tray_icon::Icon::from_rgba(rgba(variant).to_vec(), ICON_PX as u32, ICON_PX as u32).ok()
 }
 
 // -------------------------------------------------------------- self-test --
@@ -203,14 +279,15 @@ mod tests {
         [buf.px[i], buf.px[i + 1], buf.px[i + 2], buf.px[i + 3]]
     }
 
-    /// Is this pixel glyph-white rather than plate-coloured?
-    fn is_glyph(px: [u8; 4]) -> bool {
-        px[0] > 240 && px[1] > 240 && px[2] > 240
+    /// Is this pixel the glyph colour for `variant`, rather than the plate's?
+    fn is_glyph(px: [u8; 4], variant: Variant) -> bool {
+        let g = variant.glyph();
+        px[0].abs_diff(g[0]) < 24 && px[1].abs_diff(g[1]) < 24 && px[2].abs_diff(g[2]) < 24
     }
 
     /// True where the ring's radius shows the plate, i.e. the ring is broken.
     fn gap_at(deg: u32) -> bool {
-        let buf = draw(256);
+        let buf = draw(256, Variant::Dark);
         let s = 256.0f32;
         let pad = s * 0.078;
         let w = s - pad * 2.0;
@@ -220,12 +297,12 @@ mod tests {
         let x = (cx + r.cos() * (w * RING)).round() as u32;
         let y = (cy + r.sin() * (w * RING)).round() as u32;
         let px = at(&buf, x, y);
-        !is_glyph(px) && px[3] > 200
+        !is_glyph(px, Variant::Dark) && px[3] > 200
     }
 
     #[test]
-    fn plate_colour_is_the_agreed_violet() {
-        let buf = draw(64);
+    fn dark_plate_is_the_agreed_violet() {
+        let buf = draw(64, Variant::Dark);
         // Four points on the plate but clear of the glyph. Not the centre, and
         // not straight above or below it: the stem runs up the middle with a
         // round cap that reaches past the ring, so every pixel on that line is
@@ -233,10 +310,50 @@ mod tests {
         for (x, y) in [(32u32, 52u32), (16, 32), (48, 32), (20, 48)] {
             assert_eq!(
                 at(&buf, x, y),
-                [PLATE[0], PLATE[1], PLATE[2], 255],
+                [VIOLET[0], VIOLET[1], VIOLET[2], 255],
                 "plate is the wrong colour at ({x}, {y})"
             );
         }
+    }
+
+    #[test]
+    fn light_variant_is_inverted_and_outlined() {
+        let buf = draw(64, Variant::Light);
+        // The plate inverts: white where the dark variant is violet.
+        for (x, y) in [(32u32, 52u32), (16, 32), (48, 32), (20, 48)] {
+            assert_eq!(
+                at(&buf, x, y),
+                [255, 255, 255, 255],
+                "light plate is not white at ({x}, {y})"
+            );
+        }
+
+        // And the glyph inverts with it: violet where the dark variant is white.
+        let cy = 64.0f32 * (0.078 + 0.844 / 2.0);
+        let cx = 64.0f32 * (0.078 + 0.844 / 2.0);
+        let centre = at(&buf, cx.round() as u32, cy.round() as u32);
+        assert!(
+            is_glyph(centre, Variant::Light),
+            "the stem should be violet in the light variant, got {centre:?}"
+        );
+
+        // The outline is the whole point of this variant: without it the plate
+        // vanishes against a white taskbar. Check the border ring is violet.
+        let mut outlined = 0;
+        for deg in 0..360 {
+            let r = (deg as f32).to_radians();
+            let d = 64.0f32 * 0.844 / 2.0 - 2.0;
+            let x = (cx + r.cos() * d) as u32;
+            let y = (cy + r.sin() * d) as u32;
+            if is_glyph(at(&buf, x, y), Variant::Light) {
+                outlined += 1;
+            }
+        }
+        assert!(
+            outlined > 250,
+            "light variant has almost no outline ({outlined}/360); it would be \
+             invisible on a white taskbar"
+        );
     }
 
     #[test]
@@ -261,7 +378,7 @@ mod tests {
 
     #[test]
     fn stem_runs_vertically_up_the_centre() {
-        let buf = draw(256);
+        let buf = draw(256, Variant::Dark);
         let s = 256.0f32;
         let pad = s * 0.078;
         let w = s - pad * 2.0;
@@ -378,7 +495,10 @@ mod tests {
                 "app.ico has no uncompressed {COMPARE_AT} px frame - re-run assets/New-Icon.ps1"
             )
         });
-        let ours = draw(COMPARE_AT).px;
+        // assets/app.ico is the dark variant; the light one has no .ico on disk,
+        // because Explorer and the Start menu always draw it on a light
+        // background where a white plate would be invisible.
+        let ours = draw(COMPARE_AT, Variant::Dark).px;
 
         assert_eq!(embedded.len(), ours.len(), "frame size mismatch");
 

@@ -56,17 +56,29 @@ impl Tray {
 
     /// Refreshes the tooltip to reflect the current mode.
     ///
-    /// The icon itself is mode-independent now - it is a flat violet plate - so
+    /// The icon itself is mode-independent - it is a flat violet plate - so
     /// there is nothing to redraw here. The mode is still announced by the
     /// tooltip, which is where a user actually looks.
     pub fn set_mode(&self, mode: Mode) {
         self.icon
             .set_tooltip(Some(format!("XMG Optimizer - {}", mode.label())));
     }
+
+    /// Swaps the tray icon to match the theme.
+    ///
+    /// This is the only app icon that can change while the app is running.
+    /// egui 0.36 has no runtime window-icon setter, and the one compiled into
+    /// the executable by `build.rs` is a build-time resource that Explorer,
+    /// the Start menu and a pinned taskbar button all read from the file.
+    pub fn set_dark(&self, dark: bool) {
+        if let Some(i) = icon::tray_icon(dark) {
+            let _ = self.icon.set_icon(Some(i));
+        }
+    }
 }
 
 /// Builds the tray icon. `None` when the notification area is unavailable.
-pub fn build(mode: Mode, on_ac: bool) -> Option<Tray> {
+pub fn build(mode: Mode, on_ac: bool, dark: bool) -> Option<Tray> {
     let menu = Menu::new();
 
     let head = MenuItem::new(
@@ -93,7 +105,7 @@ pub fn build(mode: Mode, on_ac: bool) -> Option<Tray> {
     menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
 
-    let icon_handle = icon::tray_icon()?;
+    let icon_handle = icon::tray_icon(dark)?;
 
     let built = TrayIconBuilder::new()
         .with_menu(Box::new(menu))

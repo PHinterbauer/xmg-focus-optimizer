@@ -13,29 +13,41 @@ pub const TASK_NAME: &str = "XMG-Optimizer-Worker";
 
 /// Runs a `schtasks` subcommand silently. `true` when it succeeded.
 fn run_task(args: &[&str]) -> bool {
-    Command::new("schtasks")
-        .args(args)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let out = match Command::new("schtasks").args(args).output() {
+        Ok(o) => o,
+        Err(e) => {
+            crate::log_error!("schtasks could not be started: {e}");
+            return false;
+        }
+    };
+    crate::log::command("schtasks", args, &out);
+    out.status.success()
 }
 
 /// `true` when the elevated worker task is registered.
 pub fn task_exists() -> bool {
-    Command::new("schtasks")
-        .args(["/query", "/tn", TASK_NAME])
+    let args = ["/query", "/tn", TASK_NAME];
+    let ok = Command::new("schtasks")
+        .args(args)
         .output()
         .map(|o| o.status.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    crate::log_info!("scheduled task registered: {ok}");
+    ok
 }
 
 /// Removes the worker task.
 pub fn unregister_task() -> bool {
-    Command::new("schtasks")
-        .args(["/delete", "/tn", TASK_NAME, "/f"])
+    let args = ["/delete", "/tn", TASK_NAME, "/f"];
+    let ok = Command::new("schtasks")
+        .args(args)
         .output()
         .map(|o| o.status.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if ok {
+        crate::log_info!("scheduled task removed");
+    }
+    ok
 }
 
 /// Asks the registered task to run the worker. Returns `false` if there is no
@@ -110,15 +122,40 @@ pub fn elevate_directly() -> bool {
 }
 
 /// Runs a job, preferring the silent scheduled task.
-pub fn submit(job: Job) {
+///
+/// Returns `true` when something was actually launched. A `false` here used to
+/// be swallowed, which left the UI's `busy` flag set forever and made every
+/// later button look dead - the job was queued and nothing ever ran it.
+pub fn submit(job: Job) -> bool {
+    log_info!("submitting job: {job:?}");
     jobs::clear_pending();
+
     if let Err(e) = jobs::write_job(&job) {
+        log_error!("could not queue the job: {e}");
         jobs::write_result(&JobResult::fail(format!("Could not prepare the job: {e}")));
-        return;
+        return false;
     }
-    if !trigger_worker() {
-        elevate_directly();
+
+    if trigger_worker() {
+        log_info!("worker triggered through the scheduled task");
+        return true;
     }
+
+    log_warn!("scheduled task did not start; falling back to a direct elevated run");
+    if elevate_directly() {
+        log_info!("direct elevated run started");
+        return true;
+    }
+
+    // Neither route worked. Say so loudly rather than leaving the UI to hang.
+    log_error!("could not start the worker by either route");
+    jobs::write_result(&JobResult::fail(
+        "The background task could not be started.\n\n\
+         Run the app once as administrator so it can register its task:\n\
+         right-click the executable > Run as administrator."
+            .into(),
+    ));
+    false
 }
 
 /// One-time setup: create the worker task if it is missing.

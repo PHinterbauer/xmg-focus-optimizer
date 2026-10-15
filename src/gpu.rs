@@ -11,15 +11,21 @@ use crate::errors::{AppError, AppResult};
 
 fn smi(args: &[&str]) -> Option<String> {
     let out = Command::new("nvidia-smi").args(args).output().ok()?;
+    crate::log::command("nvidia-smi", args, &out);
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn smi_ok(args: &[&str]) -> bool {
-    Command::new("nvidia-smi")
-        .args(args)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    match Command::new("nvidia-smi").args(args).output() {
+        Ok(o) => {
+            crate::log::command("nvidia-smi", args, &o);
+            o.status.success()
+        }
+        Err(e) => {
+            crate::log_error!("nvidia-smi could not be started: {e}");
+            false
+        }
+    }
 }
 
 /// Current power limit in watts.

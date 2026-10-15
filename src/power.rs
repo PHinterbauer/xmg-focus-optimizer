@@ -14,13 +14,25 @@ fn powercfg(args: &[&str]) -> AppResult<String> {
     let out = Command::new("powercfg")
         .args(args)
         .output()
-        .map_err(|e| AppError::Power(format!("powercfg could not be started: {e}")))?;
+        .map_err(|e| {
+            crate::log_error!("powercfg could not be started: {e}");
+            AppError::Power(format!("powercfg could not be started: {e}"))
+        })?;
+    crate::log::command("powercfg", args, &out);
+    if !out.status.success() {
+        crate::log_error!(
+            "powercfg {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Runs `powercfg`, returning `Some(text)` only when it exited cleanly.
 fn powercfg_ok(args: &[&str]) -> Option<String> {
     let out = Command::new("powercfg").args(args).output().ok()?;
+    crate::log::command("powercfg", args, &out);
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {

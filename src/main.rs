@@ -14,6 +14,7 @@ mod errors;
 mod fans;
 mod gpu;
 mod icon;
+mod log;
 mod jobs;
 mod monitor;
 mod paths;
@@ -37,8 +38,13 @@ use profile::Mode;
 const MUTEX_NAME: &str = "Local\\XMGOptimizerSingleton";
 
 fn main() {
+    // Open the log first, before anything can fail. Whatever happens next is
+    // recorded from here on.
+    log::init();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let lowered: Vec<String> = args.iter().map(|a| a.to_ascii_lowercase()).collect();
+    log_info!("process started: {}", std::env::args().collect::<Vec<_>>().join(" "));
 
     // ---------------------------------------------------------- worker mode --
     if lowered.iter().any(|a| a == "--worker") {
@@ -48,10 +54,12 @@ fn main() {
 
     // Elevated one-time setup, launched via ShellExecute runas.
     if lowered.iter().any(|a| a == "--setup-elevated") {
+        log_info!("running elevated one-time setup");
         match elevate::register_worker_task() {
-            Ok(()) => worker::log("background task registered"),
-            Err(e) => worker::log(&format!("task registration failed: {e}")),
+            Ok(()) => log_info!("background task registered"),
+            Err(e) => log_error!("task registration failed: {e}"),
         }
+        log_info!("setup finished");
         return;
     }
 
@@ -80,16 +88,45 @@ fn main() {
 }
 
 fn run_worker() {
+    // This process is invisible to the user: launched by the scheduled task at
+    // highest privileges with no console. Everything it does has to land in the
+    // log, or a failure here is completely invisible.
+    log_info!("worker started, pid={}", std::process::id());
+
     let job = match jobs::read_job() {
-        Ok(j) => j,
-        Err(_) => {
-            // Nothing queued (for example the task fired at log-on). Exit quietly.
+        Ok(j) => {
+            log_info!("worker picked up a queued job: {j:?}");
+            j
+        }
+        Err(e) => {
+            // Nothing queued (for example the task fired at log-on). Exit.
+            log_info!("worker started with nothing queued ({e}) - exiting");
             return;
         }
     };
-    let result = worker::execute(job).unwrap_or_else(|e| jobs::JobResult::fail(e.to_string()));
+
+    let result = worker::execute(job).unwrap_or_else(|e| {
+        log_error!("worker job failed outright: {e}");
+        jobs::JobResult::fail(e.to_string())
+    });
+
+    log_info!(
+        "worker finished: ok={} summary={} details={} warnings={}",
+        result.ok,
+        result.summary,
+        result.details.len(),
+        result.warnings.len()
+    );
+    for d in &result.details {
+        log_info!("    detail: {d}");
+    }
+    for w in &result.warnings {
+        log_warn!("    warning: {w}");
+    }
+
     jobs::write_result(&result);
     jobs::clear_pending();
+    log_info!("worker exiting");
 }
 
 fn run_cli_command(cmd: &str, args: &[String]) {

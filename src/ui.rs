@@ -58,6 +58,9 @@ pub struct App {
     elevated_ready: bool,
 
     busy: bool,
+    /// When the current job was queued, so a job that never reports back can be
+    /// given up on instead of locking the UI forever.
+    busy_since: Option<std::time::Instant>,
     notes: Vec<Note>,
 
     /// Live comparison of the selected mode against the machine's real settings.
@@ -110,6 +113,7 @@ impl App {
             on_ac,
             elevated_ready: elevate::task_exists(),
             busy: false,
+            busy_since: None,
             notes: Vec::new(),
             drift: None,
             drift_acknowledged: false,
@@ -135,10 +139,24 @@ impl App {
             app.hide_to_tray();
         }
         app.refresh();
+        // A job that finished while the app was closed still has a result
+        // sitting on disk. Show it, rather than leaving the user wondering.
+        if let Some(r) = jobs::take_result() {
+            log_info!("recovered a job result left over from a previous session");
+            app.note("a previous request had finished", NoteKind::Ok);
+            app.push_result(r);
+        }
         // Reconciles this app's own Run entry with the stored preference, and
         // nothing else. Another program's startup entry is never touched.
         app.reconcile_autostart();
         app.recheck_drift();
+        log_info!(
+            "UI started: mode={:?} on_ac={} backup_dir={:?} factory={}",
+            app.settings.mode,
+            app.on_ac,
+            app.backup_dir,
+            app.has_factory
+        );
 
         // Launched by Windows: silently put the saved mode back in place.
         // Because applying is idempotent this normally changes nothing at all.
@@ -184,7 +202,15 @@ impl App {
     }
 
     fn recheck_drift(&mut self) {
-        self.drift = Some(drift::check(self.settings.mode, self.on_ac));
+        let d = drift::check(self.settings.mode, self.on_ac);
+        log_debug!(
+            "drift check: {}/{} settings consistent, managed={}, scheme={:?}",
+            d.total() - d.drifted(),
+            d.total(),
+            d.managed,
+            d.scheme_name
+        );
+        self.drift = Some(d);
     }
 
     fn hide_to_tray(&self) {
@@ -201,6 +227,12 @@ impl App {
     }
 
     fn note(&mut self, text: impl Into<String>, kind: NoteKind) {
+        let text = text.into();
+        match kind {
+            NoteKind::Err => crate::log_error!("note: {text}"),
+            NoteKind::Warn => crate::log_warn!("note: {text}"),
+            NoteKind::Ok => log_info!("note: {text}"),
+        }
         self.notes.insert(
             0,
             Note {
@@ -217,17 +249,26 @@ impl App {
         self.note(r.summary.clone(), kind);
         for d in &r.details {
             self.note(format!("  {d}"), NoteKind::Ok);
+            log_info!("result detail: {d}");
         }
         for w in &r.warnings {
             self.note(format!("  ! {w}"), NoteKind::Warn);
+            log_warn!("result warning: {w}");
         }
         self.refresh();
         self.recheck_drift();
     }
 
     fn submit_now(&mut self, job: Job) {
+        // Watch the clock from the moment the job is queued.
+        self.busy_since = Some(std::time::Instant::now());
         self.busy = true;
-        elevate::submit(job);
+        if !elevate::submit(job) {
+            // Dispatch already reported the failure into the result slot.
+            self.busy = false;
+            self.busy_since = None;
+        }
+        log_info!("job submitted (busy={})", self.busy);
     }
 
     fn submit(&mut self, job: Job) {
@@ -327,8 +368,35 @@ impl App {
 
         if self.busy {
             if let Some(r) = jobs::take_result() {
+                let took = self
+                    .busy_since
+                    .map(|t| t.elapsed().as_secs_f32())
+                    .unwrap_or(0.0);
+                log_info!("job finished after {:.1}s, ok={}", took, r.ok);
                 self.busy = false;
+                self.busy_since = None;
                 self.push_result(r);
+            } else if let Some(since) = self.busy_since {
+                // A queued job that never produces a result used to leave
+                // `busy` set forever, and submit() then refused every later
+                // click with "still working on the previous request" - which
+                // looks exactly like every button in the app being broken.
+                let waited = since.elapsed().as_secs_f32();
+                if waited > JOB_TIMEOUT_SECS {
+                    log_error!(
+                        "no result {waited:.1}s after submitting; giving up and unlocking the UI"
+                    );
+                    self.busy = false;
+                    self.busy_since = None;
+                    self.note(
+                        format!(
+                            "That request did not finish within {:.0}s and was abandoned. \
+                             See the log for why - the buttons are unlocked again.",
+                            JOB_TIMEOUT_SECS
+                        ),
+                        NoteKind::Err,
+                    );
+                }
             }
         }
     }
@@ -504,6 +572,16 @@ impl eframe::App for App {
 
 use crate::theme::{accent, card_bg, err_color, ok_color, surface, surface_stroke, warn_color};
 
+/// How long a queued job may take before the UI stops waiting and unlocks.
+///
+/// Fans are driven through UI Automation of a vendor app that may be slow to
+/// open, so this is generous. It exists only to stop one stuck job from
+/// disabling the whole window.
+const JOB_TIMEOUT_SECS: f32 = 120.0;
+
+/// A card the whole of which is one big button. Returns `true` when clicked.
+///
+/// Only for cards that contain nothing else clickable - see [`panel_card`].
 fn card<R>(
     ui: &mut egui::Ui,
     selected: bool,
@@ -511,28 +589,46 @@ fn card<R>(
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> bool {
     let dark = ui.visuals().dark_mode;
-    let (fill, stroke) = if selected {
-        (
-            tone.gamma_multiply(if dark { 0.22 } else { 0.10 }),
-            Stroke::new(1.5, tone),
-        )
+    let fill = if selected {
+        tone.gamma_multiply(if dark { 0.30 } else { 0.10 })
     } else {
-        // Cards sit a step above the panel rather than being the same colour,
-        // so they read as raised even in a flat theme.
-        (
-            card_bg(dark),
-            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
-        )
+        card_bg(dark)
+    };
+    let edge = if selected {
+        Stroke::new(1.5, tone)
+    } else {
+        Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color)
     };
 
     let resp = egui::Frame::new()
         .fill(fill)
         .corner_radius(CornerRadius::same(12))
         .inner_margin(14.0)
-        .stroke(stroke)
+        .stroke(edge)
         .show(ui, add_contents);
 
     resp.response.interact(egui::Sense::click()).clicked()
+}
+
+/// A card that holds buttons of its own and is therefore **not** clickable.
+///
+/// This split is not cosmetic. A card made clickable with
+/// `Response::interact(Sense::click)` claims pointer events across its whole
+/// rectangle, which races with every button inside it - the card and the button
+/// compete for the same click, and the result is buttons that sometimes do
+/// nothing. A card is either one big button, or a container. Never both.
+fn panel_card<R>(
+    ui: &mut egui::Ui,
+    tone: egui::Color32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) {
+    let dark = ui.visuals().dark_mode;
+    egui::Frame::new()
+        .fill(card_bg(dark))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(14.0)
+        .stroke(Stroke::new(1.0, tone.gamma_multiply(if dark { 0.45 } else { 0.3 })))
+        .show(ui, add_contents);
 }
 
 fn section(ui: &mut egui::Ui, title: &str) {
@@ -888,7 +984,7 @@ impl App {
         ui.add_space(12.0);
         section(ui, "Initial backup");
         ui.horizontal(|ui| {
-            card(ui, false, accent(Mode::Quiet, dark), |ui| {
+            panel_card(ui, accent(Mode::Quiet, dark), |ui| {
                 if self.has_factory {
                     ui.label(RichText::new("Present").strong().size(15.0));
                     ui.label(
@@ -910,7 +1006,7 @@ impl App {
                     });
                 }
             });
-            card(ui, false, warn_color(), |ui| {
+            panel_card(ui, warn_color(), |ui| {
                 ui.label(RichText::new("Create a new one").strong().size(15.0));
                 ui.label(
                     RichText::new("three confirmations required")
@@ -1094,7 +1190,7 @@ impl App {
         let mut changed = false;
 
         section(ui, "Launch");
-        card(ui, false, tone, |ui| {
+        panel_card(ui, tone, |ui| {
             let before = self.settings.start_with_system;
             ui.checkbox(&mut self.settings.start_with_system, "Start with Windows");
             if before != self.settings.start_with_system {
@@ -1136,7 +1232,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Power watching");
-        card(ui, false, tone, |ui| {
+        panel_card(ui, tone, |ui| {
             ui.checkbox(
                 &mut self.settings.auto_switch_on_power_change,
                 "Re-apply automatically when the charger changes",
@@ -1158,7 +1254,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Behaviour");
-        card(ui, false, tone, |ui| {
+        panel_card(ui, tone, |ui| {
             ui.checkbox(
                 &mut self.settings.confirm_before_apply,
                 "Ask before applying a mode",
@@ -1175,7 +1271,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Appearance");
-        card(ui, false, tone, |ui| {
+        panel_card(ui, tone, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Theme");
                 for t in [Theme::System, Theme::Light, Theme::Dark] {
@@ -1192,7 +1288,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Elevation");
-        card(ui, false, tone, |ui| {
+        panel_card(ui, tone, |ui| {
             if self.elevated_ready {
                 ui.label(RichText::new("Background task registered").strong().size(13.0));
                 ui.label(

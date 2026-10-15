@@ -59,11 +59,18 @@ impl FanOutcome {
 
 /// Applies the fan profile described by the mode parameters.
 pub fn apply(params: &Params) -> FanOutcome {
+    log_info!(
+        "fan apply starting, target mode {:?} offset {}",
+        params.fan_mode,
+        params.fan_offset
+    );
     let Some(hwnd) = find_app_window() else {
+        log_warn!("the XMG fan app window was not found - fans left untouched");
         return FanOutcome::Unavailable(
             "the XMG fan app was not found - fans left untouched".into(),
         );
     };
+    log_info!("found the XMG fan app window");
 
     // COM has to be initialised on this thread before any automation call.
     // A changed-mode result means COM is already up in another apartment; the

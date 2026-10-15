@@ -12,6 +12,7 @@
 
 use egui::{Color32, Stroke, Visuals};
 
+use crate::log::{log_debug, log_info, log_warn};
 use crate::profile::Mode;
 
 // ------------------------------------------------------------- palette ---

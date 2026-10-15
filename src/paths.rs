@@ -119,7 +119,7 @@ fn known_folder_documents() -> Option<PathBuf> {
 
         // FOLDERID_Documents = {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
         unsafe {
-            let mut ptr: *mut PWSTR = std::ptr::null_mut();
+            let ptr: *mut PWSTR = std::ptr::null_mut();
             let hr = SHGetKnownFolderPath(
                 &windows::core::GUID::from_u128(0xfdd39ad0_238f_46af_adb4_6c85480369c7),
                 Default::default(),

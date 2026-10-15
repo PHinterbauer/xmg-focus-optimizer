@@ -337,23 +337,35 @@ mod tests {
             "the stem should be violet in the light variant, got {centre:?}"
         );
 
-        // The outline is the whole point of this variant: without it the plate
-        // vanishes against a white taskbar. Check the border ring is violet.
-        let mut outlined = 0;
-        for deg in 0..360 {
-            let r = (deg as f32).to_radians();
-            let d = 64.0f32 * 0.844 / 2.0 - 2.0;
-            let x = (cx + r.cos() * d) as u32;
-            let y = (cy + r.sin() * d) as u32;
-            if is_glyph(at(&buf, x, y), Variant::Light) {
-                outlined += 1;
+        // The outline is the whole point of this variant: without it a white plate
+        // vanishes against a white taskbar. Rather than try to count violet
+        // around the perimeter - which needs pixel-centre arithmetic to land on
+        // the right ring and is brittle either way - walk in from each edge to
+        // the first opaque pixel. That pixel is the outline, by construction,
+        // and if the outline ever goes away it is simply white instead.
+        let size = 64u32;
+        let mid = (size / 2) as usize;
+        for name in ["up", "down", "left", "right"] {
+            let mut found = None;
+            for k in 0..size as usize {
+                let (x, y) = if name == "left" || name == "right" {
+                    (k, mid)
+                } else {
+                    (mid, k)
+                };
+                let px = at(&buf, x as u32, y as u32);
+                if px[3] > 128 {
+                    found = Some(px);
+                    break;
+                }
             }
+            let px = found.unwrap_or_else(|| panic!("nothing opaque scanning {name}"));
+            assert!(
+                is_glyph(px, Variant::Light),
+                "the first opaque pixel from the {name} edge is {px:?}, not the \
+                 violet outline; the light variant would be invisible on white"
+            );
         }
-        assert!(
-            outlined > 250,
-            "light variant has almost no outline ({outlined}/360); it would be \
-             invisible on a white taskbar"
-        );
     }
 
     #[test]

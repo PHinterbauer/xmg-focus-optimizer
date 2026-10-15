@@ -45,8 +45,7 @@ Every change this app makes is reversible, and a way back exists **before** each
   <br><sub>*its parameters are unpublished, and a wrong call can leave a laptop unbootable*</sub>
 - deletes a power scheme it did not create
 - changes a setting you asked it to keep
-- adds, removes, delays or rewrites **another program's startup entry** &mdash; applying a mode never
-  touches OneDrive, LG HUB, Edge, Docker, Roblox or anything else that launches at sign-in
+- adds, removes, delays or rewrites **another program's startup entry**
 
 > [!NOTE]
 > The one startup entry the app writes is **its own**, `XMGOptimizer`, so it can come back at sign-in.

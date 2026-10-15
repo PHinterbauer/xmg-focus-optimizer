@@ -153,8 +153,7 @@ pub fn submit(job: Job) -> bool {
     jobs::write_result(&JobResult::fail(
         "The background task could not be started.\n\n\
          Run the app once as administrator so it can register its task:\n\
-         right-click the executable > Run as administrator."
-            .into(),
+         right-click the executable > Run as administrator.",
     ));
     false
 }

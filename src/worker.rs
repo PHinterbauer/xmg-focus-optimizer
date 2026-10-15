@@ -213,7 +213,12 @@ fn finish_apply(
         }
     }
 
-    r.details.push("Game DVR off, Game Mode on".into());
+    // NOTE: this used to report "Game DVR off, Game Mode on". Nothing in this
+    // codebase ever touched either setting - it was a hardcoded string claiming
+    // a change that never happened, which is the one thing a tool like this
+    // must never do. If Game DVR / Game Mode support is ever added for real, it
+    // needs an entry in the initial backup like everything else, so that a
+    // restore can put it back.
 
     let _ = std::fs::write(
         crate::paths::app_data_dir().join("active-mode.txt"),

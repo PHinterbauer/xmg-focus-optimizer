@@ -27,7 +27,8 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 # --- constants, mirrored from src/icon.rs ------------------------------------
-$PLATE      = @(109, 40, 217)
+$PLATE      = @(0, 230, 118)
+$GLYPH      = @(17, 17, 20)
 $RING       = 0.205
 $STROKE     = 0.090
 $ARC_START  = -45.0
@@ -97,9 +98,9 @@ for ($y = 0; $y -lt $Size; $y++) {
         if ($g -le 0.0) { continue }
         $i = ($y * $Size + $x) * 4
         $inv = 1.0 - $g
-        $px[$i]     = $px[$i]     * $inv + 255.0 * $g
-        $px[$i + 1] = $px[$i + 1] * $inv + 255.0 * $g
-        $px[$i + 2] = $px[$i + 2] * $inv + 255.0 * $g
+        $px[$i]     = $px[$i]     * $inv + $GLYPH[0] * $g
+        $px[$i + 1] = $px[$i + 1] * $inv + $GLYPH[1] * $g
+        $px[$i + 2] = $px[$i + 2] * $inv + $GLYPH[2] * $g
     }
 }
 

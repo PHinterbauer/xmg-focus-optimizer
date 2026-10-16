@@ -6,9 +6,9 @@
 //! size that matters most in the notification area.
 //!
 //! Two variants exist because two different backgrounds need them. The tray
-//! icon follows the theme: a white plate on a light taskbar, the violet plate
+//! icon follows the theme: a white plate on a light taskbar, the green plate
 //! everywhere else. Inside the window and in the title bar there is only ever
-//! the violet brand plate, so the app looks the same everywhere it owns the
+//! the green brand plate, so the app looks the same everywhere it owns the
 //! pixels.
 //!
 //! This must stay in step with `assets/New-Icon.ps1`, which draws the same
@@ -24,10 +24,11 @@
 /// The two looks the icon comes in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Variant {
-    /// Violet plate, white glyph. For a dark taskbar, and the one baked into
-    /// `assets/app.ico`.
+    /// Green plate, dark glyph. For a dark taskbar, and the one baked into
+    /// `assets/app.ico`. The glyph is dark rather than white because white on
+    /// this green washes out at tray size.
     Dark,
-    /// White plate, violet glyph, violet outline. For a light taskbar.
+    /// White plate, deep-green glyph and outline. For a light taskbar.
     ///
     /// The outline is not decoration. A plain white plate would disappear
     /// completely against a white taskbar or a light window title bar, which is
@@ -39,7 +40,7 @@ impl Variant {
     /// The plate fill.
     fn plate(self) -> [u8; 3] {
         match self {
-            Variant::Dark => VIOLET,
+            Variant::Dark => GREEN,
             Variant::Light => [255, 255, 255],
         }
     }
@@ -47,8 +48,8 @@ impl Variant {
     /// The power symbol, and the light variant's outline.
     fn glyph(self) -> [u8; 3] {
         match self {
-            Variant::Dark => [255, 255, 255],
-            Variant::Light => VIOLET,
+            Variant::Dark => INK,
+            Variant::Light => GREEN_DEEP,
         }
     }
 }
@@ -59,8 +60,16 @@ struct Rgba {
     px: Vec<u8>, // straight alpha, RGBA
 }
 
-/// The brand violet, and the plate colour in `assets/New-Icon.ps1`.
-const VIOLET: [u8; 3] = [109, 40, 217];
+/// The brand green, and the plate colour in `assets/New-Icon.ps1`.
+const GREEN: [u8; 3] = [0, 230, 118];
+
+/// Deep green for the light variant's glyph and outline, where the vivid
+/// green would not read against white.
+const GREEN_DEEP: [u8; 3] = [0, 122, 61];
+
+/// Near-black for the dark variant's glyph, for the same reason in reverse:
+/// white on the vivid plate washes out at 16 px.
+const INK: [u8; 3] = [17, 17, 20];
 
 /// Ring radius and stroke width, both as a fraction of the plate's side.
 const RING: f32 = 0.205;
@@ -238,9 +247,9 @@ pub fn rgba(variant: Variant) -> &'static [u8] {
 
 /// egui texture for use inside the window.
 ///
-/// Always the brand plate (violet), whichever theme is active. The light
+/// Always the brand plate (green), whichever theme is active. The light
 /// variant exists for the notification area, where a white taskbar needs it -
-/// inside our own window the violet plate reads better on both themes, and it
+/// inside our own window the green plate reads better on both themes, and it
 /// matches the title-bar icon and the executable's icon.
 pub fn texture(ctx: &egui::Context) -> egui::TextureHandle {
     DARK_TEX
@@ -318,16 +327,16 @@ mod tests {
     }
 
     #[test]
-    fn dark_plate_is_the_agreed_violet() {
+    fn dark_plate_is_the_agreed_green() {
         let buf = draw(64, Variant::Dark);
         // Four points on the plate but clear of the glyph. Not the centre, and
         // not straight above or below it: the stem runs up the middle with a
         // round cap that reaches past the ring, so every pixel on that line is
-        // glyph-white. These four sit outside the ring's outer edge instead.
+        // glyph-dark. These four sit outside the ring's outer edge instead.
         for (x, y) in [(32u32, 52u32), (16, 32), (48, 32), (20, 48)] {
             assert_eq!(
                 at(&buf, x, y),
-                [VIOLET[0], VIOLET[1], VIOLET[2], 255],
+                [GREEN[0], GREEN[1], GREEN[2], 255],
                 "plate is the wrong colour at ({x}, {y})"
             );
         }
@@ -336,7 +345,7 @@ mod tests {
     #[test]
     fn light_variant_is_inverted_and_outlined() {
         let buf = draw(64, Variant::Light);
-        // The plate inverts: white where the dark variant is violet.
+        // The plate inverts: white where the dark variant is green.
         for (x, y) in [(32u32, 52u32), (16, 32), (48, 32), (20, 48)] {
             assert_eq!(
                 at(&buf, x, y),
@@ -345,17 +354,17 @@ mod tests {
             );
         }
 
-        // And the glyph inverts with it: violet where the dark variant is white.
+        // And the glyph inverts with it: deep green where the dark variant is dark.
         let cy = 64.0f32 * (0.078 + 0.844 / 2.0);
         let cx = 64.0f32 * (0.078 + 0.844 / 2.0);
         let centre = at(&buf, cx.round() as u32, cy.round() as u32);
         assert!(
             is_glyph(centre, Variant::Light),
-            "the stem should be violet in the light variant, got {centre:?}"
+            "the stem should be green in the light variant, got {centre:?}"
         );
 
         // The outline is the whole point of this variant: without it a white plate
-        // vanishes against a white taskbar. Rather than try to count violet
+        // vanishes against a white taskbar. Rather than try to count green
         // around the perimeter - which needs pixel-centre arithmetic to land on
         // the right ring and is brittle either way - walk in from each edge to
         // the first opaque pixel. That pixel is the outline, by construction,
@@ -380,7 +389,7 @@ mod tests {
             assert!(
                 is_glyph(px, Variant::Light),
                 "the first opaque pixel from the {name} edge is {px:?}, not the \
-                 violet outline; the light variant would be invisible on white"
+                 green outline; the light variant would be invisible on white"
             );
         }
     }
@@ -427,7 +436,7 @@ mod tests {
         }
 
         // And the same must hold for the light variant, where the stem is
-        // violet rather than white.
+        // deep green rather than dark.
         let light = draw(256, Variant::Light);
         for step in 0..8 {
             let y = (from + step as f32 * 0.5).round() as u32;

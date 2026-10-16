@@ -307,6 +307,9 @@ impl App {
 
     fn apply_current_mode(&mut self) {
         let s = self.settings.clone();
+        // Said out loud in the status bar, so there is a visible record that
+        // the click registered before the (slow) worker reports back.
+        self.note(format!("Applying {}…", s.mode.label()), NoteKind::Ok);
         self.submit(Job::Apply {
             mode: s.mode,
             control_fans: s.control_fans,
@@ -614,7 +617,16 @@ impl eframe::App for App {
                         }
                         if self.elevated_ready {
                             pill(ui, "Background task ready", true);
-                        } else if ui.button("Finish setup").clicked() {
+                        } else if ui
+                            .button("Finish setup")
+                            .on_hover_text(
+                                "Registers the background task once (a single UAC prompt). \
+                                 After that, applying modes and charger auto-switch run \
+                                 silently with no further prompts. Without it, every \
+                                 apply falls back to a UAC prompt.",
+                            )
+                            .clicked()
+                        {
                             match elevate::ensure_setup() {
                                 Ok(true) => {
                                     self.elevated_ready = true;
@@ -763,7 +775,7 @@ fn nav_item(
                         ui.visuals().widgets.noninteractive.bg_stroke.color,
                     )
                 })
-                .corner_radius(CornerRadius::same(8))
+                .corner_radius(CornerRadius::same(7))
                 .min_size(Vec2::new(ui.available_width(), 26.0)),
             )
             .clicked()
@@ -816,7 +828,7 @@ fn card<R>(
 
     let resp = egui::Frame::new()
         .fill(fill)
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(8))
         .inner_margin(14.0)
         .stroke(edge)
         .show(ui, add_contents);
@@ -839,7 +851,7 @@ fn panel_card<R>(
     let dark = ui.visuals().dark_mode;
     egui::Frame::new()
         .fill(card_bg(dark))
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(8))
         .inner_margin(14.0)
         .stroke(Stroke::new(1.0, tone.gamma_multiply(if dark { 0.45 } else { 0.3 })))
         .show(ui, add_contents);
@@ -1020,7 +1032,7 @@ impl App {
                         figure(&mut c[1], "Fans", p.fan_mode.label());
                     });
                 });
-                if clicked && !selected {
+                if clicked && !selected && !self.busy {
                     self.settings.mode = *mode;
                     let _ = self.settings.save();
                     self.drift_acknowledged = false;
@@ -1038,21 +1050,39 @@ impl App {
             // fills, near-black on the light one. Hardcoded white text is what
             // used to vanish on light fills.
             let fill = accent(self.settings.mode, dark);
+            let label = if self.busy {
+                format!("Applying {}…", self.settings.mode.label())
+            } else {
+                format!("Apply {}", self.settings.mode.label())
+            };
             if ui
-                .add(
+                .add_enabled(
+                    !self.busy,
                     egui::Button::new(
-                        RichText::new(format!("Apply {}", self.settings.mode.label()))
+                        RichText::new(label)
                             .size(14.5)
                             .strong()
                             .color(contrast_text(fill)),
                     )
                     .fill(fill)
-                    .corner_radius(CornerRadius::same(9))
+                    .corner_radius(CornerRadius::same(7))
                     .min_size(Vec2::new(200.0, 42.0)),
                 )
                 .clicked()
             {
                 self.apply_current_mode();
+            }
+            // A mode switch rewrites a scheme, shells out a dozen times and
+            // drives the fan app through UI automation - seconds, not frames.
+            // The header spinner alone was too easy to miss, so the button
+            // also says what is happening right where the click landed.
+            if self.busy {
+                ui.spinner();
+                ui.label(
+                    RichText::new("Working… the app has not frozen.")
+                        .size(12.0)
+                        .color(ui.visuals().weak_text_color()),
+                );
             }
         });
 
@@ -1091,7 +1121,7 @@ impl App {
 
         egui::Frame::new()
             .fill(bg)
-            .corner_radius(CornerRadius::same(10))
+            .corner_radius(CornerRadius::same(8))
             .inner_margin(12.0)
             .show(ui, |ui| {
                 if clean && managed {
@@ -1139,14 +1169,15 @@ impl App {
                         );
                         ui.horizontal(|ui| {
                             if ui
-                                .add(
+                                .add_enabled(
+                                    !self.busy,
                                     egui::Button::new(
                                         RichText::new(format!("Change to {}", report.mode.label()))
                                             .strong()
                                             .color(contrast_text(tint)),
                                     )
                                     .fill(tint)
-                                    .corner_radius(CornerRadius::same(8))
+                                    .corner_radius(CornerRadius::same(7))
                                     .min_size(Vec2::new(150.0, 32.0)),
                                 )
                                 .clicked()
@@ -1156,7 +1187,7 @@ impl App {
                             if ui
                                 .add(
                                     egui::Button::new("Keep current settings")
-                                        .corner_radius(CornerRadius::same(8))
+                                        .corner_radius(CornerRadius::same(7))
                                         .min_size(Vec2::new(160.0, 32.0)),
                                 )
                                 .clicked()
@@ -1247,7 +1278,7 @@ impl App {
         egui::Frame::new()
             .fill(surface(dark))
             .stroke(Stroke::new(1.0, surface_stroke(dark)))
-            .corner_radius(CornerRadius::same(10))
+            .corner_radius(CornerRadius::same(8))
             .inner_margin(12.0)
             .show(ui, |ui| {
                 ui.label(
@@ -1282,7 +1313,7 @@ impl App {
         egui::Frame::new()
             .fill(surface(dark))
             .stroke(Stroke::new(1.0, surface_stroke(dark)))
-            .corner_radius(CornerRadius::same(10))
+            .corner_radius(CornerRadius::same(8))
             .inner_margin(12.0)
             .show(ui, |ui| {
                 ui.label(
@@ -1352,7 +1383,7 @@ impl App {
             egui::Frame::new()
                 .fill(warn_color().gamma_multiply(if dark { 0.14 } else { 0.10 }))
                 .stroke(Stroke::new(1.0, warn_color().gamma_multiply(0.45)))
-                .corner_radius(CornerRadius::same(10))
+                .corner_radius(CornerRadius::same(8))
                 .inner_margin(12.0)
                 .show(ui, |ui| match self.confirm_stage {
                     1 => {

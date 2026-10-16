@@ -38,12 +38,11 @@ $SS    = 1024                       # supersampling canvas
 
 # ------------------------------------------------------------------ palette --
 #
-# One colour. Deep violet, saturated enough to stay legible against a dark
-# taskbar and bright enough to read against a light one. The white glyph on top
-# of it is roughly 5.9:1 contrast, which is why the glyph is white rather than
-# another tint.
-$PLATE = [System.Drawing.Color]::FromArgb(255, 109, 40, 217)   # #6D28D9
-$GLYPH = [System.Drawing.Color]::White
+# One colour. Vivid XMG green, which pops against a dark taskbar. The glyph is
+# near-black rather than white: white on this green washes out at tray size,
+# while dark-on-green reads at roughly 8:1.
+$PLATE = [System.Drawing.Color]::FromArgb(255, 0, 230, 118)   # #00E676
+$GLYPH = [System.Drawing.Color]::FromArgb(255, 17, 17, 20)
 
 # ------------------------------------------------------------------ shape --
 

@@ -1,6 +1,6 @@
 //! The colour system.
 //!
-//! One brand colour: the XMG accent (#2596BE). Dark
+//! One brand colour: XMG green. Dark
 //! mode is near-black; light mode is clean white and grey. The
 //! two modes share a hue but nothing else - one is a room with the lights off,
 //! the other is paper.
@@ -17,23 +17,24 @@ use crate::profile::Mode;
 
 // ------------------------------------------------------------- palette ---
 
-/// The brand accent, sampled from the XMG logo: #2596BE.
-///
-/// This is deliberately separate from the violet plate in `src/icon.rs` - the
-/// icon keeps its violet plate, and everything the UI paints uses this.
+/// The brand accent: XMG green.
 ///
 /// Derived shades below follow the same structure as before: a bright end for
 /// dark mode, a deep end for light mode, so Quiet and Performance stay
 /// distinguishable without the app turning two colours.
-pub const ACCENT: Color32 = Color32::from_rgb(0x25, 0x96, 0xBE);
+///
+/// NOTE: this deliberately differs from the icon plate. The icon keeps a deep
+/// green plate with a dark glyph; the UI accent is the vivid green. Both come
+/// from the same family so they read as one brand.
+pub const ACCENT: Color32 = Color32::from_rgb(0x00, 0xE6, 0x76);
 
-/// Brighter accent, for text and borders that have to sit on near-black.
-pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(0x7C, 0xC0, 0xD8);
+/// Bright accent, for text and borders that have to sit on near-black.
+pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(0x69, 0xF0, 0xAE);
 
-const ACCENT_400: Color32 = Color32::from_rgb(0x7C, 0xC0, 0xD8);
-const ACCENT_500: Color32 = Color32::from_rgb(0x25, 0x96, 0xBE);
-const ACCENT_700: Color32 = Color32::from_rgb(0x1B, 0x6C, 0x89);
-const ACCENT_900: Color32 = Color32::from_rgb(0x14, 0x52, 0x68);
+const ACCENT_400: Color32 = Color32::from_rgb(0x69, 0xF0, 0xAE);
+const ACCENT_500: Color32 = Color32::from_rgb(0x00, 0xE6, 0x76);
+const ACCENT_700: Color32 = Color32::from_rgb(0x00, 0x83, 0x43);
+const ACCENT_900: Color32 = Color32::from_rgb(0x00, 0x5C, 0x2F);
 
 /// Dark mode is the primary look: true black, white text, accent used only as a
 /// highlight. The accent is deliberately sparse so it reads as a highlight
@@ -257,15 +258,15 @@ pub fn visuals(dark: bool) -> Visuals {
     w.inactive.weak_bg_fill = w.inactive.bg_fill;
     w.inactive.bg_stroke = Stroke::new(1.0, stroke(dark));
     w.inactive.fg_stroke = fg;
-    w.inactive.corner_radius = egui::CornerRadius::same(7);
+    w.inactive.corner_radius = egui::CornerRadius::same(6);
 
     // Hover lifts the surface and tints the border with the accent, so the pointer
     // position is unmistakable.
-    w.hovered.bg_fill = if dark { D_CARD_HI.gamma_multiply(1.35) } else { Color32::from_rgb(243, 240, 255) };
+    w.hovered.bg_fill = if dark { D_CARD_HI.gamma_multiply(1.35) } else { Color32::from_rgb(232, 250, 240) };
     w.hovered.weak_bg_fill = w.hovered.bg_fill;
     w.hovered.bg_stroke = Stroke::new(1.0, ACCENT_LIGHT);
     w.hovered.fg_stroke = fg;
-    w.hovered.corner_radius = egui::CornerRadius::same(7);
+    w.hovered.corner_radius = egui::CornerRadius::same(6);
 
     // Pressed is solid accent. The label colour is computed from luminance, so
     // it stays readable whatever the accent is.
@@ -273,13 +274,13 @@ pub fn visuals(dark: bool) -> Visuals {
     w.active.weak_bg_fill = ACCENT;
     w.active.bg_stroke = Stroke::new(1.0, ACCENT_LIGHT);
     w.active.fg_stroke = Stroke::new(1.0, contrast_text(ACCENT));
-    w.active.corner_radius = egui::CornerRadius::same(7);
+    w.active.corner_radius = egui::CornerRadius::same(6);
 
     w.open.bg_fill = ACCENT.gamma_multiply(if dark { 0.45 } else { 0.18 });
     w.open.weak_bg_fill = w.open.bg_fill;
     w.open.bg_stroke = Stroke::new(1.0, accent_col);
     w.open.fg_stroke = fg;
-    w.open.corner_radius = egui::CornerRadius::same(7);
+    w.open.corner_radius = egui::CornerRadius::same(6);
 
     v.selection.bg_fill = ACCENT.gamma_multiply(if dark { 0.5 } else { 0.28 });
     v.selection.stroke = Stroke::new(1.0, accent_col);
@@ -293,8 +294,8 @@ pub fn visuals(dark: bool) -> Visuals {
 
     // Squarer corners overall, and a little more breathing room than the
     // egui defaults, which are tuned for dense debug UIs.
-    v.window_corner_radius = egui::CornerRadius::same(10);
-    v.menu_corner_radius = egui::CornerRadius::same(8);
+    v.window_corner_radius = egui::CornerRadius::same(6);
+    v.menu_corner_radius = egui::CornerRadius::same(6);
 
     v
 }
@@ -371,10 +372,10 @@ mod tests {
         // White on a light fill is the classic failure (bright button,
         // invisible label). The choice is computed, so lock both sides.
         assert_eq!(contrast_text(ACCENT_400), Color32::from_rgb(17, 17, 20));
-        assert_eq!(contrast_text(ACCENT_500), Color32::WHITE);
+        assert_eq!(contrast_text(ACCENT_500), Color32::from_rgb(17, 17, 20));
         assert_eq!(contrast_text(ACCENT_700), Color32::WHITE);
         assert_eq!(contrast_text(ACCENT_900), Color32::WHITE);
-        assert_eq!(contrast_text(ACCENT), Color32::WHITE);
+        assert_eq!(contrast_text(ACCENT), Color32::from_rgb(17, 17, 20));
     }
 
     #[test]

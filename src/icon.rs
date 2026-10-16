@@ -5,10 +5,11 @@
 //! Depth effects that look good at 256 px turn to mud at 16 px, which is the
 //! size that matters most in the notification area.
 //!
-//! Two variants, so the tray and the in-window logo follow the theme. The icon
-//! compiled into the executable by `build.rs` cannot: it is a build-time
-//! resource, and Explorer, the Start menu and a pinned taskbar button all read
-//! it from the file rather than from the running process.
+//! Two variants exist because two different backgrounds need them. The tray
+//! icon follows the theme: a white plate on a light taskbar, the violet plate
+//! everywhere else. Inside the window and in the title bar there is only ever
+//! the violet brand plate, so the app looks the same everywhere it owns the
+//! pixels.
 //!
 //! This must stay in step with `assets/New-Icon.ps1`, which draws the same
 //! geometry at 1024 px and writes `assets/app.ico`. The angles below are in the
@@ -226,7 +227,6 @@ const ICON_PX: usize = 64;
 static DARK_RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
 static LIGHT_RGBA: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
 static DARK_TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
-static LIGHT_TEX: std::sync::OnceLock<egui::TextureHandle> = std::sync::OnceLock::new();
 
 /// Straight RGBA pixels for the icon, rendered once per variant.
 pub fn rgba(variant: Variant) -> &'static [u8] {
@@ -236,19 +236,22 @@ pub fn rgba(variant: Variant) -> &'static [u8] {
     }
 }
 
-/// egui texture for use inside the window, following the theme.
-pub fn texture(ctx: &egui::Context, dark: bool) -> egui::TextureHandle {
-    let (cell, name) = if dark {
-        (&DARK_TEX, "icon-dark")
-    } else {
-        (&LIGHT_TEX, "icon-light")
-    };
-    let variant = if dark { Variant::Dark } else { Variant::Light };
-    cell.get_or_init(|| {
-        let img = egui::ColorImage::from_rgba_unmultiplied([ICON_PX, ICON_PX], rgba(variant));
-        ctx.load_texture(name, img, egui::TextureOptions::LINEAR)
-    })
-    .clone()
+/// egui texture for use inside the window.
+///
+/// Always the brand plate (violet), whichever theme is active. The light
+/// variant exists for the notification area, where a white taskbar needs it -
+/// inside our own window the violet plate reads better on both themes, and it
+/// matches the title-bar icon and the executable's icon.
+pub fn texture(ctx: &egui::Context) -> egui::TextureHandle {
+    DARK_TEX
+        .get_or_init(|| {
+            let img = egui::ColorImage::from_rgba_unmultiplied(
+                [ICON_PX, ICON_PX],
+                rgba(Variant::Dark),
+            );
+            ctx.load_texture("icon", img, egui::TextureOptions::LINEAR)
+        })
+        .clone()
 }
 
 /// Title-bar icon, drawn by the same code as the tray icon.

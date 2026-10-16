@@ -37,10 +37,6 @@ pub struct Settings {
     /// app's own entry only - never another program's.
     pub start_with_system: bool,
 
-    /// Close to the notification area instead of quitting, so the background
-    /// power-state watcher keeps running.
-    pub start_minimized_to_tray: bool,
-
     /// Watch for the charger being plugged in or removed and re-apply the
     /// matching settings automatically.
     pub auto_switch_on_power_change: bool,
@@ -64,11 +60,9 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Quiet,
-            // Off by default: a plain double-click must open the window. Hiding
-            // on launch used to be the default, which is why the window flashed
-            // open and dropped straight to the tray on first run.
+            // On by default: the app keeps the laptop right when the charger comes
+            // out mid-session, without you having to open it.
             start_with_system: true,
-            start_minimized_to_tray: false,
             auto_switch_on_power_change: true,
             notify_on_auto_switch: false,
             confirm_before_apply: false,

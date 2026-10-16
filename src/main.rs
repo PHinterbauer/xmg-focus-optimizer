@@ -233,13 +233,12 @@ fn run_gui(start_hidden: bool, autostarted: bool) {
     let (tx_monitor, rx_monitor) = channel::<monitor::MonitorEvent>();
     let stop_watch = monitor::spawn(settings.clone(), tx_monitor.clone());
 
-    // A plain double-click opens the window. The window only starts hidden
-    // when it was launched hidden on purpose: `--tray`, or `--autostart` from
-    // the Run key (silent re-apply), or the stored "start in tray" preference.
-    // The old code OR-ed in `start_minimized_to_tray` whose default was true,
-    // so every first launch flashed the window and dropped straight to tray.
-    let hidden =
-        start_hidden || autostarted || settings.start_minimized_to_tray;
+    // A plain double-click always opens the window. Hidden start happens only
+    // for launches that asked for it: `--tray`, or `--autostart` from the Run
+    // key at login. The old "start in tray" preference is gone - it defaulted
+    // to hiding on first run, which is why the window flashed open and dropped
+    // straight to the tray.
+    let hidden = start_hidden || autostarted;
 
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

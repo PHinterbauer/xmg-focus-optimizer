@@ -4,15 +4,15 @@
 //! landed on the machine rather than what we hoped would.
 
 use std::collections::HashMap;
-use std::process::Command;
 
 use crate::errors::{AppError, AppResult};
 use crate::profile::PlanEntry;
 use crate::log::{log_error};
 
-/// Runs `powercfg` and returns stdout.
+/// Runs `powercfg` and returns stdout. Never shows a console window; see
+/// [`crate::sysutil::silent_command`].
 fn powercfg(args: &[&str]) -> AppResult<String> {
-    let out = Command::new("powercfg")
+    let out = crate::sysutil::silent_command("powercfg")
         .args(args)
         .output()
         .map_err(|e| {
@@ -32,7 +32,7 @@ fn powercfg(args: &[&str]) -> AppResult<String> {
 
 /// Runs `powercfg`, returning `Some(text)` only when it exited cleanly.
 fn powercfg_ok(args: &[&str]) -> Option<String> {
-    let out = Command::new("powercfg").args(args).output().ok()?;
+    let out = crate::sysutil::silent_command("powercfg").args(args).output().ok()?;
     crate::log::command("powercfg", args, &out);
     if out.status.success() {
         Some(String::from_utf8_lossy(&out.stdout).into_owned())

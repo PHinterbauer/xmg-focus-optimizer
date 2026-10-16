@@ -5,16 +5,16 @@
 //! a mode is instant and silent. If the task is missing, the app falls back to
 //! a normal UAC prompt so nothing is ever blocked.
 
-use std::process::Command;
-
 use crate::jobs::{self, Job, JobResult};
 use crate::log::{log_error, log_info, log_warn};
 
 pub const TASK_NAME: &str = "XMG-Optimizer-Worker";
 
 /// Runs a `schtasks` subcommand silently. `true` when it succeeded.
+///
+/// Never shows a console window; see [`crate::sysutil::silent_command`].
 fn run_task(args: &[&str]) -> bool {
-    let out = match Command::new("schtasks").args(args).output() {
+    let out = match crate::sysutil::silent_command("schtasks").args(args).output() {
         Ok(o) => o,
         Err(e) => {
             log_error!("schtasks could not be started: {e}");
@@ -28,7 +28,7 @@ fn run_task(args: &[&str]) -> bool {
 /// `true` when the elevated worker task is registered.
 pub fn task_exists() -> bool {
     let args = ["/query", "/tn", TASK_NAME];
-    let ok = Command::new("schtasks")
+    let ok = crate::sysutil::silent_command("schtasks")
         .args(args)
         .output()
         .map(|o| o.status.success())
@@ -40,7 +40,7 @@ pub fn task_exists() -> bool {
 /// Removes the worker task.
 pub fn unregister_task() -> bool {
     let args = ["/delete", "/tn", TASK_NAME, "/f"];
-    let ok = Command::new("schtasks")
+    let ok = crate::sysutil::silent_command("schtasks")
         .args(args)
         .output()
         .map(|o| o.status.success())
@@ -63,7 +63,7 @@ pub fn register_worker_task() -> Result<(), String> {
     let exe = exe.to_string_lossy().into_owned();
     let action = format!("\"{exe}\" --worker");
 
-    let ok = Command::new("schtasks")
+    let ok = crate::sysutil::silent_command("schtasks")
         .args([
             "/create",
             "/tn",

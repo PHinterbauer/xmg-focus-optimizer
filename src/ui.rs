@@ -504,11 +504,16 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::Image::new(&icon::texture(ui.ctx(), dark))
+                        egui::Image::new(&icon::texture(ui.ctx()))
                             .fit_to_exact_size(Vec2::new(30.0, 30.0)),
                     );
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("XMG Focus").size(15.0).strong());
+                        ui.label(
+                            RichText::new("XMG Focus")
+                                .size(15.0)
+                                .strong()
+                                .color(ui.visuals().text_color()),
+                        );
                         ui.label(
                             RichText::new("Optimizer")
                                 .size(15.0)
@@ -566,54 +571,61 @@ impl eframe::App for App {
             });
 
         // --- page header ----------------------------------------------------
+        //
+        // One row: the title and its explanation on the left, the live status
+        // on the right, vertically centred. This used to stack the title block
+        // above a separate right-aligned row inside a 64 px panel, which
+        // squeezed the blurb against the separator line.
         egui::Panel::top("header")
-            .exact_size(64.0)
+            .exact_size(80.0)
             .frame(
                 egui::Frame::new()
                     .fill(ui.visuals().panel_fill)
-                    .inner_margin(Margin::symmetric(20, 10))
+                    .inner_margin(Margin::symmetric(20, 12))
                     .stroke(egui::Stroke::new(
                         0.0,
                         ui.visuals().widgets.noninteractive.bg_stroke.color,
                     )),
             )
             .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(self.tab.title())
-                            .size(21.0)
-                            .strong()
-                            .color(ui.visuals().text_color()),
-                    );
-                    ui.label(
-                        RichText::new(self.tab.blurb())
-                            .size(12.5)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                });
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(self.tab.title())
+                                .size(21.0)
+                                .strong()
+                                .color(ui.visuals().text_color()),
+                        );
+                        ui.label(
+                            RichText::new(self.tab.blurb())
+                                .size(12.5)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    });
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if self.busy {
-                        ui.spinner();
-                    }
-                    if self.on_ac {
-                        pill(ui, "Mains power", true);
-                    } else {
-                        pill(ui, "On battery", false);
-                    }
-                    if self.elevated_ready {
-                        pill(ui, "Background task ready", true);
-                    } else if ui.button("Finish setup").clicked() {
-                        match elevate::ensure_setup() {
-                            Ok(true) => {
-                                self.elevated_ready = true;
-                                self.note("background task registered", NoteKind::Ok);
-                            }
-                            Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                            Err(e) => self.note(e, NoteKind::Err),
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if self.busy {
+                            ui.spinner();
                         }
-                    }
-                    ui.add_space(4.0);
+                        if self.on_ac {
+                            pill(ui, "Mains power", true);
+                        } else {
+                            pill(ui, "On battery", false);
+                        }
+                        if self.elevated_ready {
+                            pill(ui, "Background task ready", true);
+                        } else if ui.button("Finish setup").clicked() {
+                            match elevate::ensure_setup() {
+                                Ok(true) => {
+                                    self.elevated_ready = true;
+                                    self.note("background task registered", NoteKind::Ok);
+                                }
+                                Ok(false) => self.note("setup incomplete", NoteKind::Warn),
+                                Err(e) => self.note(e, NoteKind::Err),
+                            }
+                        }
+                        ui.add_space(4.0);
+                    });
                 });
             });
 
@@ -699,7 +711,7 @@ fn nav_label(ui: &mut egui::Ui, text: &str) {
 ///
 /// Drawn as a button rather than a label so the whole row is the hit target -
 /// a 20 pixel line of text is not something to aim at. The active row is
-/// filled, outlined, and given a violet bar down its left edge, so the eye
+/// filled, outlined, and given an accent bar down its left edge, so the eye
 /// finds it without having to read it.
 fn nav_item(
     ui: &mut egui::Ui,
@@ -771,7 +783,7 @@ fn nav_item(
     clicked
 }
 
-use crate::theme::{accent, card_bg, err_color, ok_color, surface, surface_stroke, warn_color};
+use crate::theme::{accent, card_bg, contrast_text, err_color, ok_color, surface, surface_stroke, warn_color};
 use crate::log::{log_debug, log_error, log_info, log_warn};
 
 /// How long a queued job may take before the UI stops waiting and unlocks.
@@ -962,12 +974,17 @@ impl App {
                 let clicked = card(&mut cols[i], selected, tone, |ui| {
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::Image::new(&icon::texture(ui.ctx(), dark))
+                            egui::Image::new(&icon::texture(ui.ctx()))
                                 .fit_to_exact_size(Vec2::new(30.0, 30.0)),
                         );
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(mode.label()).size(19.0).strong());
+                                ui.label(
+                                    RichText::new(mode.label())
+                                        .size(19.0)
+                                        .strong()
+                                        .color(ui.visuals().text_color()),
+                                );
                                 if selected {
                                     ui.label(
                                         RichText::new("ACTIVE")
@@ -1017,15 +1034,19 @@ impl App {
 
         ui.add_space(16.0);
         ui.horizontal(|ui| {
+            // The label colour is computed from the fill: white on the deep
+            // fills, near-black on the light one. Hardcoded white text is what
+            // used to vanish on light fills.
+            let fill = accent(self.settings.mode, dark);
             if ui
                 .add(
                     egui::Button::new(
                         RichText::new(format!("Apply {}", self.settings.mode.label()))
                             .size(14.5)
                             .strong()
-                            .color(egui::Color32::WHITE),
+                            .color(contrast_text(fill)),
                     )
-                    .fill(accent(self.settings.mode, dark))
+                    .fill(fill)
                     .corner_radius(CornerRadius::same(9))
                     .min_size(Vec2::new(200.0, 42.0)),
                 )
@@ -1057,7 +1078,7 @@ impl App {
 
         section(ui, "Consistency check");
 
-        // The drift report is a status, so it keeps semantic colours: violet when the
+        // The drift report is a status, so it keeps semantic colours: accent when the
         // scheme is ours and consistent, amber when something disagrees.
         let (bg, tint) = if clean && managed {
             (surface(dark), accent(Mode::Quiet, dark))
@@ -1081,7 +1102,8 @@ impl App {
                             report.mode.label()
                         ))
                         .strong()
-                        .size(13.0),
+                        .size(13.0)
+                        .color(ui.visuals().text_color()),
                     );
                     ui.label(
                         RichText::new(format!(
@@ -1121,7 +1143,7 @@ impl App {
                                     egui::Button::new(
                                         RichText::new(format!("Change to {}", report.mode.label()))
                                             .strong()
-                                            .color(egui::Color32::WHITE),
+                                            .color(contrast_text(tint)),
                                     )
                                     .fill(tint)
                                     .corner_radius(CornerRadius::same(8))
@@ -1228,7 +1250,12 @@ impl App {
             .corner_radius(CornerRadius::same(10))
             .inner_margin(12.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("This app never:").strong().size(12.5));
+                ui.label(
+                    RichText::new("This app never:")
+                        .strong()
+                        .size(12.5)
+                        .color(ui.visuals().text_color()),
+                );
                 for line in [
                     "overclocks or undervolts anything",
                     "disables HVCI / VBS or other security features",
@@ -1517,16 +1544,6 @@ impl App {
                 )
                 .size(11.5)
                 .color(ui.visuals().weak_text_color()),
-            );
-            ui.add_space(6.0);
-            ui.checkbox(
-                &mut self.settings.start_minimized_to_tray,
-                "Collapse into the tray when opened",
-            );
-            ui.label(
-                RichText::new("Starts straight in the notification area instead of a window.")
-                    .size(11.5)
-                    .color(ui.visuals().weak_text_color()),
             );
         });
 

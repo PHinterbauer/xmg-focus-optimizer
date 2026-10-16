@@ -128,3 +128,27 @@ pub fn notify_existing_instance(name: &str) {
 pub fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
+
+// ------------------------------------------------------- child processes ---
+
+/// Builds a child-process command that never shows a console window.
+///
+/// Every external tool this app runs (`powercfg`, `nvidia-smi`, `schtasks`) is
+/// a console-subsystem binary, and Windows pops a terminal for each one unless
+/// `CREATE_NO_WINDOW` is set. One drift check alone spawns half a dozen of
+/// them, which is the "whole bunch of cmd windows" from the bug report.
+/// GUI-subsystem children (Explorer) ignore the flag, so it is safe everywhere.
+#[cfg(windows)]
+pub fn silent_command(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut c = std::process::Command::new(program);
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
+
+/// Non-Windows fallback: no flag exists, plain spawn.
+#[cfg(not(windows))]
+pub fn silent_command(program: &str) -> std::process::Command {
+    std::process::Command::new(program)
+}

@@ -1,13 +1,13 @@
 //! The colour system.
 //!
-//! One brand colour: a deep violet, the same one the icon is drawn in. Dark
-//! mode is violet-tinted near-black; light mode is clean white and grey. The
+//! One brand colour: the XMG accent (#2596BE). Dark
+//! mode is near-black; light mode is clean white and grey. The
 //! two modes share a hue but nothing else - one is a room with the lights off,
 //! the other is paper.
 //!
 //! Mode is still readable at a glance, but through the *ramp* rather than
-//! through two unrelated colours: Quiet is the lighter violet, Performance the
-//! deeper one. That keeps the old "blue means calm, amber means hot" signal
+//! through two unrelated colours: Quiet is the lighter end, Performance the
+//! deeper one. That keeps the old "calm versus hot" signal
 //! while making the app read as one thing.
 
 use egui::{Color32, Stroke, Visuals};
@@ -17,20 +17,27 @@ use crate::profile::Mode;
 
 // ------------------------------------------------------------- palette ---
 
-/// The brand violet, and the plate colour in `src/icon.rs`.
-pub const VIOLET: Color32 = Color32::from_rgb(109, 40, 217);
+/// The brand accent, sampled from the XMG logo: #2596BE.
+///
+/// This is deliberately separate from the violet plate in `src/icon.rs` - the
+/// icon keeps its violet plate, and everything the UI paints uses this.
+///
+/// Derived shades below follow the same structure as before: a bright end for
+/// dark mode, a deep end for light mode, so Quiet and Performance stay
+/// distinguishable without the app turning two colours.
+pub const ACCENT: Color32 = Color32::from_rgb(0x25, 0x96, 0xBE);
 
-/// Brighter violet, for text and borders that have to sit on near-black.
-pub const VIOLET_LIGHT: Color32 = Color32::from_rgb(167, 139, 250);
+/// Brighter accent, for text and borders that have to sit on near-black.
+pub const ACCENT_LIGHT: Color32 = Color32::from_rgb(0x7C, 0xC0, 0xD8);
 
-const VIOLET_400: Color32 = Color32::from_rgb(167, 139, 250);
-const VIOLET_500: Color32 = Color32::from_rgb(139, 92, 246);
-const VIOLET_700: Color32 = Color32::from_rgb(109, 40, 217);
-const VIOLET_900: Color32 = Color32::from_rgb(76, 29, 149);
+const ACCENT_400: Color32 = Color32::from_rgb(0x7C, 0xC0, 0xD8);
+const ACCENT_500: Color32 = Color32::from_rgb(0x25, 0x96, 0xBE);
+const ACCENT_700: Color32 = Color32::from_rgb(0x1B, 0x6C, 0x89);
+const ACCENT_900: Color32 = Color32::from_rgb(0x14, 0x52, 0x68);
 
-/// Dark mode is the primary look: true black, white text, violet used only as a
-/// highlight. The violet is deliberately sparse so it reads as an accent rather
-/// than as a colour scheme.
+/// Dark mode is the primary look: true black, white text, accent used only as a
+/// highlight. The accent is deliberately sparse so it reads as a highlight
+/// rather than as a colour scheme.
 const D_WINDOW: Color32 = Color32::from_rgb(0, 0, 0);
 const D_PANEL: Color32 = Color32::from_rgb(10, 10, 12);
 const D_CARD: Color32 = Color32::from_rgb(19, 19, 23);
@@ -159,10 +166,24 @@ pub fn weak_text(dark: bool) -> Color32 {
 /// the two stay distinguishable without the app turning two colours.
 pub fn accent(mode: Mode, dark: bool) -> Color32 {
     match (mode, dark) {
-        (Mode::Quiet, true) => VIOLET_400,
-        (Mode::Quiet, false) => VIOLET_700,
-        (Mode::Performance, true) => VIOLET_500,
-        (Mode::Performance, false) => VIOLET_900,
+        (Mode::Quiet, true) => ACCENT_400,
+        (Mode::Quiet, false) => ACCENT_700,
+        (Mode::Performance, true) => ACCENT_500,
+        (Mode::Performance, false) => ACCENT_900,
+    }
+}
+
+/// Text colour that reads on top of a filled accent.
+///
+/// White on a light fill is the classic failure (bright button, invisible
+/// label), so the choice is computed from luminance rather than picked by
+/// hand. Dark fills get white, light fills get near-black.
+pub fn contrast_text(bg: Color32) -> Color32 {
+    let lum = 0.2126 * bg.r() as f32 + 0.7152 * bg.g() as f32 + 0.0722 * bg.b() as f32;
+    if lum > 140.0 {
+        Color32::from_rgb(17, 17, 20)
+    } else {
+        Color32::WHITE
     }
 }
 
@@ -173,15 +194,15 @@ pub fn accent(mode: Mode, dark: bool) -> Color32 {
 /// fought the theme. Status colour now only appears on actual status - the
 /// notes and the pills.
 pub fn surface(dark: bool) -> Color32 {
-    VIOLET.gamma_multiply(if dark { 0.22 } else { 0.08 })
+    ACCENT.gamma_multiply(if dark { 0.22 } else { 0.08 })
 }
 
 /// The border colour that goes with [`surface`].
 pub fn surface_stroke(dark: bool) -> Color32 {
-    VIOLET.gamma_multiply(if dark { 0.55 } else { 0.32 })
+    ACCENT.gamma_multiply(if dark { 0.55 } else { 0.32 })
 }
 
-/// Semantic status colours. Deliberately not violet: these mean "good",
+/// Semantic status colours. Deliberately not the accent: these mean "good",
 /// "careful" and "wrong", and borrowing the brand hue for them would make them
 /// unreadable.
 pub fn ok_color() -> Color32 {
@@ -238,32 +259,32 @@ pub fn visuals(dark: bool) -> Visuals {
     w.inactive.fg_stroke = fg;
     w.inactive.corner_radius = egui::CornerRadius::same(7);
 
-    // Hover lifts the surface and tints the border violet, so the pointer
+    // Hover lifts the surface and tints the border with the accent, so the pointer
     // position is unmistakable.
     w.hovered.bg_fill = if dark { D_CARD_HI.gamma_multiply(1.35) } else { Color32::from_rgb(243, 240, 255) };
     w.hovered.weak_bg_fill = w.hovered.bg_fill;
-    w.hovered.bg_stroke = Stroke::new(1.0, VIOLET_LIGHT);
+    w.hovered.bg_stroke = Stroke::new(1.0, ACCENT_LIGHT);
     w.hovered.fg_stroke = fg;
     w.hovered.corner_radius = egui::CornerRadius::same(7);
 
-    // Pressed is solid violet. With white text on top that is a strong,
-    // unambiguous "this is happening now".
-    w.active.bg_fill = VIOLET;
-    w.active.weak_bg_fill = VIOLET;
-    w.active.bg_stroke = Stroke::new(1.0, VIOLET_LIGHT);
-    w.active.fg_stroke = Stroke::new(1.0, if dark { Color32::WHITE } else { Color32::WHITE });
+    // Pressed is solid accent. The label colour is computed from luminance, so
+    // it stays readable whatever the accent is.
+    w.active.bg_fill = ACCENT;
+    w.active.weak_bg_fill = ACCENT;
+    w.active.bg_stroke = Stroke::new(1.0, ACCENT_LIGHT);
+    w.active.fg_stroke = Stroke::new(1.0, contrast_text(ACCENT));
     w.active.corner_radius = egui::CornerRadius::same(7);
 
-    w.open.bg_fill = VIOLET.gamma_multiply(if dark { 0.45 } else { 0.18 });
+    w.open.bg_fill = ACCENT.gamma_multiply(if dark { 0.45 } else { 0.18 });
     w.open.weak_bg_fill = w.open.bg_fill;
     w.open.bg_stroke = Stroke::new(1.0, accent_col);
     w.open.fg_stroke = fg;
     w.open.corner_radius = egui::CornerRadius::same(7);
 
-    v.selection.bg_fill = VIOLET.gamma_multiply(if dark { 0.5 } else { 0.28 });
+    v.selection.bg_fill = ACCENT.gamma_multiply(if dark { 0.5 } else { 0.28 });
     v.selection.stroke = Stroke::new(1.0, accent_col);
 
-    v.hyperlink_color = if dark { VIOLET_LIGHT } else { VIOLET_700 };
+    v.hyperlink_color = if dark { ACCENT_LIGHT } else { ACCENT_700 };
     v.warn_fg_color = warn_color();
     v.error_fg_color = err_color();
     // text_cursor is left at whatever Visuals::dark()/light() chose: it is a
@@ -294,7 +315,7 @@ mod tests {
 
     #[test]
     fn dark_mode_text_is_white_and_surfaces_are_black() {
-        // The dark look is black with white text and violet highlights. These
+        // The dark look is black with white text and accent highlights. These
         // three assertions are the whole brief; if someone re-tints the panel
         // by hand later this is what catches it.
         assert_eq!(D_WINDOW, Color32::from_rgb(0, 0, 0), "window must be pure black");
@@ -325,17 +346,17 @@ mod tests {
     }
 
     #[test]
-    fn violet_is_an_accent_not_a_background() {
+    fn accent_is_used_sparingly_not_as_a_background() {
         // The accent has to stand out against black without being the colour
         // of everything.
         let v = visuals(true);
-        assert_eq!(v.hyperlink_color, VIOLET_LIGHT);
-        assert_ne!(v.panel_fill, VIOLET);
+        assert_eq!(v.hyperlink_color, ACCENT_LIGHT);
+        assert_ne!(v.panel_fill, ACCENT);
     }
 
     #[test]
     fn light_mode_text_is_dark_enough_to_read() {
-        // The light theme is meant to be "clean white and grey"; a violet wash
+        // The light theme is meant to be "clean white and grey"; an accent wash
         // that dark would make small text unreadable.
         let l = L_TEXT;
         let bg = L_PANEL;
@@ -343,6 +364,17 @@ mod tests {
             lum(bg) - lum(l) > 150.0,
             "light theme text is too close to its background"
         );
+    }
+
+    #[test]
+    fn button_labels_stay_readable_on_accent_fills() {
+        // White on a light fill is the classic failure (bright button,
+        // invisible label). The choice is computed, so lock both sides.
+        assert_eq!(contrast_text(ACCENT_400), Color32::from_rgb(17, 17, 20));
+        assert_eq!(contrast_text(ACCENT_500), Color32::WHITE);
+        assert_eq!(contrast_text(ACCENT_700), Color32::WHITE);
+        assert_eq!(contrast_text(ACCENT_900), Color32::WHITE);
+        assert_eq!(contrast_text(ACCENT), Color32::WHITE);
     }
 
     #[test]

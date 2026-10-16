@@ -5,19 +5,18 @@
 //! faulty driver therefore cannot push the card past what it supports.
 
 use std::path::Path;
-use std::process::Command;
 
 use crate::errors::{AppError, AppResult};
 use crate::log::{log_error};
 
 fn smi(args: &[&str]) -> Option<String> {
-    let out = Command::new("nvidia-smi").args(args).output().ok()?;
+    let out = crate::sysutil::silent_command("nvidia-smi").args(args).output().ok()?;
     crate::log::command("nvidia-smi", args, &out);
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn smi_ok(args: &[&str]) -> bool {
-    match Command::new("nvidia-smi").args(args).output() {
+    match crate::sysutil::silent_command("nvidia-smi").args(args).output() {
         Ok(o) => {
             crate::log::command("nvidia-smi", args, &o);
             o.status.success()

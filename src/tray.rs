@@ -56,7 +56,7 @@ impl Tray {
 
     /// Refreshes the tooltip to reflect the current mode.
     ///
-    /// The icon itself is mode-independent - it is a flat violet plate - so
+    /// The icon itself is mode-independent - it is the brand plate - so
     /// there is nothing to redraw here. The mode is still announced by the
     /// tooltip, which is where a user actually looks.
     pub fn set_mode(&self, mode: Mode) {

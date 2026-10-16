@@ -44,9 +44,9 @@ pub fn spawn() -> (Arc<Mutex<Temps>>, Arc<AtomicBool>) {
         .name("xmg-temps".into())
         .spawn(move || {
             log_info!("temperature poller started");
-            let mut cpu_dead = false;
+            let mut cpu_skip = 0u32;
             while !stop2.load(Ordering::Relaxed) {
-                let t = poll_once(&mut cpu_dead);
+                let t = poll_once(&mut cpu_skip);
                 if let Ok(mut g) = shared2.lock() {
                     *g = t;
                 }
@@ -66,23 +66,29 @@ pub fn spawn() -> (Arc<Mutex<Temps>>, Arc<AtomicBool>) {
     (shared, stop)
 }
 
-fn poll_once(cpu_dead: &mut bool) -> Temps {
+/// Polls to skip after an empty CPU answer before probing again. WMI thermal
+/// zones flake - they vanish across sleep/wake, under load, or behind a
+/// denied namespace - and one empty answer used to kill the CPU pill for the
+/// rest of the process. At 20 s per poll this retries roughly every 10 min:
+/// cheap enough to leave running, prompt enough to heal by itself.
+const CPU_RETRY_EVERY: u32 = 30;
+
+fn poll_once(cpu_skip: &mut u32) -> Temps {
     Temps {
         gpu: poll_gpu(),
-        cpu: if *cpu_dead {
+        cpu: if *cpu_skip > 0 {
+            *cpu_skip -= 1;
             None
         } else {
             match poll_cpu_wmi() {
-                // A clean empty answer means the class is absent on this
-                // machine; it will not appear later, so stop asking.
-                CpuProbe::Absent => {
-                    log_info!("no CPU temperature sensor (MSAcpi WMI class absent)");
-                    *cpu_dead = true;
+                CpuProbe::Found(v) => Some(v),
+                // Empty answer or failure alike: back off and try again
+                // later. A dead sensor costs one silent probe per backoff
+                // window; a flaky one heals on its own.
+                CpuProbe::Absent | CpuProbe::Failed => {
+                    *cpu_skip = CPU_RETRY_EVERY;
                     None
                 }
-                CpuProbe::Found(v) => Some(v),
-                // A spawn or parse failure might be transient, so keep trying.
-                CpuProbe::Failed => None,
             }
         },
     }

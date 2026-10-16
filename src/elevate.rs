@@ -37,6 +37,73 @@ pub fn task_exists() -> bool {
     ok
 }
 
+/// `true` when the task exists, points at this exact executable, and is
+/// allowed to run on battery.
+///
+/// Both halves matter. `schtasks /create` cannot express the battery policy,
+/// so every task registered the old way carries Microsoft's defaults
+/// (`DisallowStartIfOnBatteries` + `StopIfGoingOnBatteries`): on battery the
+/// task refuses to start, and a running worker is killed mid-apply on
+/// unplug. A stale path is the other classic: each release is downloaded
+/// over the previous file, and a task registered by an older copy keeps
+/// pointing at wherever that copy lived.
+pub fn task_is_healthy() -> bool {
+    let exe = match std::env::current_exe() {
+        Ok(e) => e.to_string_lossy().into_owned(),
+        Err(_) => return false,
+    };
+    let out = match crate::sysutil::silent_command("schtasks")
+        .args(["/query", "/tn", TASK_NAME, "/xml"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return false,
+    };
+    let xml = decode_task_xml(&out.stdout);
+    let healthy = parse_task_health(&xml, &exe);
+    log_info!("scheduled task healthy: {healthy}");
+    healthy
+}
+
+/// Decodes `schtasks /xml` output, which is UTF-16 with a BOM. Plain UTF-8
+/// decoding would leave a NUL between every character and match nothing.
+fn decode_task_xml(bytes: &[u8]) -> String {
+    let words: Vec<u16> = if bytes.starts_with(&[0xFF, 0xFE]) {
+        bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect()
+    } else {
+        return String::from_utf8_lossy(bytes).into_owned();
+    };
+    String::from_utf16_lossy(&words)
+}
+
+/// Checks a task definition against this executable. Pure string matching on
+/// purpose: no XML library for three tags, and a missing tag must read as
+/// unhealthy (the Scheduler defaults block battery starts).
+pub(crate) fn parse_task_health(xml: &str, exe: &str) -> bool {
+    let Some(cmd) = tag_content(xml, "Command") else {
+        return false;
+    };
+    let cmd = cmd.trim().trim_matches('"');
+    if !cmd.eq_ignore_ascii_case(exe) {
+        return false;
+    }
+    // Both must be explicitly false; absent means the blocking default.
+    tag_content(xml, "DisallowStartIfOnBatteries").is_some_and(|v| v.trim() == "false")
+        && tag_content(xml, "StopIfGoingOnBatteries").is_some_and(|v| v.trim() == "false")
+}
+
+/// First `<Tag>…</Tag>` body, if any.
+fn tag_content<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(open.as_str())? + open.len();
+    let end = xml[start..].find(close.as_str())?;
+    Some(&xml[start..start + end])
+}
+
 /// Removes the worker task.
 pub fn unregister_task() -> bool {
     let args = ["/delete", "/tn", TASK_NAME, "/f"];
@@ -58,35 +125,58 @@ pub fn trigger_worker() -> bool {
 }
 
 /// Registers the worker task. Must itself be running elevated.
+///
+/// Imported from an XML definition rather than built with `/sc onlogon`:
+/// the `schtasks` command line cannot express the battery policy, and the
+/// defaults block starts on battery and kill a running worker on unplug -
+/// exactly the workload this task exists for. The XML keeps the same
+/// identity as before (current user, highest privileges, logon trigger) and
+/// only changes the power policy plus the executable path.
 pub fn register_worker_task() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe = exe.to_string_lossy().into_owned();
-    let action = format!("\"{exe}\" --worker");
+    // XML-escape the path; usernames routinely contain `&`.
+    let action = format!("\"{}\"", exe.replace('&', "&amp;"));
 
-    let ok = crate::sysutil::silent_command("schtasks")
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n\
+         <Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n\
+         <RegistrationInfo><URI>\\{TASK_NAME}</URI></RegistrationInfo>\n\
+         <Principals><Principal id=\"Author\"><LogonType>InteractiveToken</LogonType>\
+         <RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n\
+         <Settings>\
+         <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\
+         <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\
+         <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\
+         <AllowDemandStart>true</AllowDemandStart>\
+         <Enabled>true</Enabled>\
+         </Settings>\n\
+         <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>\n\
+         <Actions Context=\"Author\"><Exec><Command>{action}</Command>\
+         <Arguments>--worker</Arguments></Exec></Actions>\n\
+         </Task>\n"
+    );
+
+    let path = std::env::temp_dir().join("xmg-task.xml");
+    std::fs::write(&path, xml.encode_utf16().flat_map(|c| c.to_le_bytes()))
+        .map_err(|e| e.to_string())?;
+    let out = crate::sysutil::silent_command("schtasks")
         .args([
             "/create",
             "/tn",
             TASK_NAME,
-            "/tr",
-            &action,
-            "/sc",
-            "onlogon",
-            "/rl",
-            "highest",
+            "/xml",
+            &path.to_string_lossy(),
             "/f",
         ])
         .output()
-        .map(|o| {
-            if !o.status.success() {
-                Err(String::from_utf8_lossy(&o.stderr).trim().to_string())
-            } else {
-                Ok(())
-            }
-        })
         .map_err(|e| e.to_string())?;
-
-    ok
+    let _ = std::fs::remove_file(&path);
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    log_info!("background task registered (battery-allowed)");
+    Ok(())
 }
 
 /// Launches the worker with a UAC prompt. Used for the first run and whenever
@@ -221,11 +311,12 @@ fn submit_in_process(job: Job) -> bool {
         .is_ok()
 }
 
-/// One-time setup: create the worker task if it is missing.
+/// One-time setup: create the worker task if it is missing - or repair it if
+/// it points elsewhere or still carries the battery-blocking defaults.
 ///
 /// Returns `Ok(true)` when everything is ready afterwards.
 pub fn ensure_setup() -> Result<bool, String> {
-    if task_exists() {
+    if task_is_healthy() {
         return Ok(true);
     }
     // Creating the task needs elevation. Spawn ourselves with --setup-elevated.

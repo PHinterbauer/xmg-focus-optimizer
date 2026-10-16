@@ -144,7 +144,7 @@ impl App {
             settings,
             tab: Tab::Dashboard,
             on_ac,
-            elevated_ready: elevate::task_exists(),
+            elevated_ready: elevate::task_is_healthy(),
             busy: false,
             busy_since: None,
             notes: Vec::new(),
@@ -402,7 +402,7 @@ impl App {
                     self.on_ac = on_ac;
                     // The task may have appeared or vanished while running;
                     // re-read it at the exact moment it matters.
-                    self.elevated_ready = elevate::task_exists();
+                    self.elevated_ready = elevate::task_is_healthy();
                     if triggered {
                         // Say what the switch actually did, not just that it happened:
                         // the headline numbers of the profile now in force.
@@ -426,7 +426,7 @@ impl App {
                 }
                 MonitorEvent::AutoSwitchSkipped { on_ac, mode: _ } => {
                     self.on_ac = on_ac;
-                    self.elevated_ready = elevate::task_exists();
+                    self.elevated_ready = elevate::task_is_healthy();
                     // Loud on purpose: without this, the scheme silently keeps
                     // the other source's values while everything else claims
                     // the switch happened.

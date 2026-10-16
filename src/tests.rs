@@ -318,6 +318,65 @@ fn snapshot_mode_only_names_apply_reasons() {
     }
 }
 
+// ------------------------------------------------------- task health check --
+
+const HEALTHY_TASK_XML: &str = "\
+<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\
+<Principals><Principal id=\"Author\"><LogonType>InteractiveToken</LogonType>\
+<RunLevel>HighestAvailable</RunLevel></Principal></Principals>\
+<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\
+<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\
+<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\
+<AllowDemandStart>true</AllowDemandStart></Settings>\
+<Actions Context=\"Author\"><Exec>\
+<Command>\"C:\\Tools\\XMG-Optimizer.exe\"</Command>\
+<Arguments>--worker</Arguments></Exec></Actions></Task>";
+
+#[test]
+fn healthy_task_passes() {
+    assert!(crate::elevate::parse_task_health(
+        HEALTHY_TASK_XML,
+        r"C:\Tools\XMG-Optimizer.exe"
+    ));
+}
+
+#[test]
+fn battery_blocked_task_fails() {
+    // Exactly what `schtasks /create /sc onlogon` produces: Microsoft's
+    // defaults block battery starts and kill running workers on unplug.
+    let blocked = HEALTHY_TASK_XML
+        .replace(
+            "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+            "<DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries>",
+        )
+        .replace(
+            "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+            "<StopIfGoingOnBatteries>true</StopIfGoingOnBatteries>",
+        );
+    assert!(!crate::elevate::parse_task_health(
+        &blocked,
+        r"C:\Tools\XMG-Optimizer.exe"
+    ));
+}
+
+#[test]
+fn stale_path_and_missing_tags_fail() {
+    // Points at an older copy.
+    assert!(!crate::elevate::parse_task_health(
+        HEALTHY_TASK_XML,
+        r"D:\Other\XMG-Optimizer.exe"
+    ));
+    // A missing tag must read as unhealthy: absent means the blocking default.
+    let no_flags = HEALTHY_TASK_XML
+        .replace("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>", "")
+        .replace("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>", "");
+    assert!(!crate::elevate::parse_task_health(
+        &no_flags,
+        r"C:\Tools\XMG-Optimizer.exe"
+    ));
+    assert!(!crate::elevate::parse_task_health("", r"C:\Tools\XMG-Optimizer.exe"));
+}
+
 // ------------------------------------------------------------- guid parsing --
 
 #[test]

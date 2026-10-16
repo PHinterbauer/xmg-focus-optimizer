@@ -46,6 +46,11 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
 
                 // Re-read settings each time so a change in the UI takes effect
                 // without a restart.
+                //
+                // INVARIANT: this thread re-applies `live.mode` with new source
+                // values, it never *changes* the mode. Quiet/Performance flips
+                // happen only through direct user clicks (profile card,
+                // tray menu). Keep it that way.
                 let live = Settings::load();
                 let _ = &settings;
 

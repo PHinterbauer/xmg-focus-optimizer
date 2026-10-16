@@ -384,10 +384,17 @@ impl App {
         {
             self.on_ac = on_ac;
             if triggered {
+                // Say what the switch actually did, not just that it happened:
+                // the headline numbers of the profile now in force.
+                let p = profile::Params::for_mode(mode, on_ac);
                 self.note(
                     format!(
-                        "power source changed to {} - re-applied {mode}",
-                        if on_ac { "mains" } else { "battery" }
+                        "power source changed to {} - re-applied {mode} \
+                         (CPU {}%, GPU {} W, fans {})",
+                        if on_ac { "mains" } else { "battery" },
+                        p.cpu_max,
+                        p.gpu_watts,
+                        p.fan_mode.label()
                     ),
                     NoteKind::Ok,
                 );
@@ -472,6 +479,22 @@ impl eframe::App for App {
             });
             self.theme_applied = Some(self.settings.theme);
             self.style_pushed = true;
+            // Resolved colours, logged so a "wrong colours" report can be
+            // checked against what the app actually installed. dark_mode,
+            // override text, and panel fill must all agree with each other.
+            {
+                let v = ctx.theme();
+                let vis = ui.visuals().clone();
+                log_info!(
+                    "theme installed: setting={:?} resolved={:?} dark_mode={} \
+                     text={:?} panel={:?}",
+                    self.settings.theme,
+                    v,
+                    vis.dark_mode,
+                    vis.override_text_color,
+                    vis.panel_fill,
+                );
+            }
             // The tray icon follows the theme, and it is the only app icon that
             // can change at runtime.
             if let Some(tray) = self.tray.as_ref() {
@@ -906,9 +929,10 @@ fn section(ui: &mut egui::Ui, title: &str) {
 
 fn pill(ui: &mut egui::Ui, text: &str, good: bool) {
     let c = if good { ok_color() } else { warn_color() };
+    // Squared chip rather than a stadium pill, to match the buttons and cards.
     egui::Frame::new()
         .fill(c.gamma_multiply(0.18))
-        .corner_radius(CornerRadius::same(20))
+        .corner_radius(CornerRadius::same(6))
         .inner_margin(Margin::symmetric(10, 4))
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(12.0).color(c));
@@ -1031,6 +1055,45 @@ impl App {
                         figure(&mut c[0], "Efficiency", format!("{}", p.epp));
                         figure(&mut c[1], "Fans", p.fan_mode.label());
                     });
+
+                    // What this profile does on each power source. A mode is
+                    // not one set of numbers: mains and battery get different
+                    // values, and the charger switch swaps between them.
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new("When the charger changes, this profile becomes:")
+                            .size(11.5)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    for (src_label, src_ac) in [("On mains", true), ("On battery", false)] {
+                        let sp = profile::Params::for_mode(*mode, src_ac);
+                        let live = src_ac == on_ac;
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(if live { "●" } else { "○" })
+                                    .size(11.0)
+                                    .color(if live {
+                                        tone
+                                    } else {
+                                        ui.visuals().weak_text_color()
+                                    }),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{src_label}: CPU {}% · GPU {} W · fans {}",
+                                    sp.cpu_max,
+                                    sp.gpu_watts,
+                                    sp.fan_mode.label()
+                                ))
+                                .size(12.0)
+                                .color(if live {
+                                    ui.visuals().text_color()
+                                } else {
+                                    ui.visuals().weak_text_color()
+                                }),
+                            );
+                        });
+                    }
                 });
                 if clicked && !selected && !self.busy {
                     self.settings.mode = *mode;
@@ -1235,9 +1298,24 @@ impl App {
                         .num_columns(3)
                         .spacing([18.0, 3.0])
                         .show(ui, |ui| {
-                            ui.label(RichText::new("Setting").size(11.0).strong());
-                            ui.label(RichText::new("Expected").size(11.0).strong());
-                            ui.label(RichText::new("Actual").size(11.0).strong());
+                            ui.label(
+                                RichText::new("Setting")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(ui.visuals().text_color()),
+                            );
+                            ui.label(
+                                RichText::new("Expected")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(ui.visuals().text_color()),
+                            );
+                            ui.label(
+                                RichText::new("Actual")
+                                    .size(11.0)
+                                    .strong()
+                                    .color(ui.visuals().text_color()),
+                            );
                             ui.end_row();
                             for c in &report.checks {
                                 let col = if c.consistent {
@@ -1316,10 +1394,14 @@ impl App {
             .corner_radius(CornerRadius::same(8))
             .inner_margin(12.0)
             .show(ui, |ui| {
+                // States its colour explicitly rather than relying on the
+                // default: this headline sits on a tinted fill, where a wrong
+                // default would be unreadable instead of merely off.
                 ui.label(
                     RichText::new("Backups are only ever added, never removed.")
                         .strong()
-                        .size(13.0),
+                        .size(13.0)
+                        .color(ui.visuals().text_color()),
                 );
                 ui.label(
                     RichText::new(
@@ -1344,14 +1426,24 @@ impl App {
         ui.horizontal(|ui| {
             panel_card(ui, accent(Mode::Quiet, dark), |ui| {
                 if self.has_factory {
-                    ui.label(RichText::new("Present").strong().size(15.0));
+                    ui.label(
+                        RichText::new("Present")
+                            .strong()
+                            .size(15.0)
+                            .color(ui.visuals().text_color()),
+                    );
                     ui.label(
                         RichText::new(format!("{} archived copies", self.archives.len()))
                             .size(12.0)
                             .color(ui.visuals().weak_text_color()),
                     );
                 } else {
-                    ui.label(RichText::new("None yet").strong().size(15.0));
+                    ui.label(
+                        RichText::new("None yet")
+                            .strong()
+                            .size(15.0)
+                            .color(ui.visuals().text_color()),
+                    );
                     ui.label(
                         RichText::new("created automatically before the first change")
                             .size(12.0)
@@ -1365,7 +1457,12 @@ impl App {
                 }
             });
             panel_card(ui, warn_color(), |ui| {
-                ui.label(RichText::new("Create a new one").strong().size(15.0));
+                ui.label(
+                    RichText::new("Create a new one")
+                        .strong()
+                        .size(15.0)
+                        .color(ui.visuals().text_color()),
+                );
                 ui.label(
                     RichText::new("three confirmations required")
                         .size(12.0)
@@ -1388,7 +1485,9 @@ impl App {
                 .show(ui, |ui| match self.confirm_stage {
                     1 => {
                         ui.label(
-                            RichText::new("Step 1 of 3 - understand what this does").strong(),
+                            RichText::new("Step 1 of 3 - understand what this does")
+                                .strong()
+                                .color(ui.visuals().text_color()),
                         );
                         ui.label(
                             RichText::new(
@@ -1410,7 +1509,9 @@ impl App {
                     }
                     2 => {
                         ui.label(
-                            RichText::new("Step 2 of 3 - name it so you can recognise it").strong(),
+                            RichText::new("Step 2 of 3 - name it so you can recognise it")
+                                .strong()
+                                .color(ui.visuals().text_color()),
                         );
                         ui.add(
                             egui::TextEdit::singleline(&mut self.confirm_note)
@@ -1427,7 +1528,11 @@ impl App {
                         });
                     }
                     _ => {
-                        ui.label(RichText::new("Step 3 of 3 - final confirmation").strong());
+                        ui.label(
+                            RichText::new("Step 3 of 3 - final confirmation")
+                                .strong()
+                                .color(ui.visuals().text_color()),
+                        );
                         ui.label(
                             RichText::new("Type  CREATE  to proceed.")
                                 .size(12.0)
@@ -1489,30 +1594,40 @@ impl App {
             })
             .collect();
 
+        // Rows are a grid, not stacked horizontals with a right-aligned button
+        // each. Right-alignment inside separate horizontals drifts from row to
+        // row as content widths differ; grid columns line up by construction.
         egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
             if rows.is_empty() {
                 ui.label(
                     RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
                 );
             }
-            for (id, text, kind) in rows.iter() {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(text.clone()).size(12.0));
-                    ui.label(
-                        RichText::new(*kind)
-                            .size(11.0)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Restore").clicked() {
-                            self.submit(Job::Restore {
-                                source: RestoreSource::Snapshot(id.clone()),
-                            });
-                        }
-                    });
-                    ui.separator();
+            egui::Grid::new("snapshot-rows")
+                .num_columns(3)
+                .spacing([14.0, 6.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for (id, text, kind) in rows.iter() {
+                        ui.label(RichText::new(text.clone()).size(12.0));
+                        ui.label(
+                            RichText::new(*kind)
+                                .size(11.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.with_layout(
+                            Layout::right_to_left(Align::Center),
+                            |ui| {
+                                if ui.small_button("Restore").clicked() {
+                                    self.submit(Job::Restore {
+                                        source: RestoreSource::Snapshot(id.clone()),
+                                    });
+                                }
+                            },
+                        );
+                        ui.end_row();
+                    }
                 });
-            }
         });
 
         if !self.archives.is_empty() {
@@ -1523,19 +1638,26 @@ impl App {
                 .iter()
                 .map(|a| (a.id.clone(), format!("{}  {}", a.id, a.note)))
                 .collect();
-            for (id, text) in arch.iter() {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(text.clone()).size(12.0).monospace());
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Restore").clicked() {
-                            self.submit(Job::Restore {
-                                source: RestoreSource::Archive(id.clone()),
-                            });
-                        }
-                    });
-                    ui.separator();
+            egui::Grid::new("archive-rows")
+                .num_columns(2)
+                .spacing([14.0, 6.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    for (id, text) in arch.iter() {
+                        ui.label(RichText::new(text.clone()).size(12.0).monospace());
+                        ui.with_layout(
+                            Layout::right_to_left(Align::Center),
+                            |ui| {
+                                if ui.small_button("Restore").clicked() {
+                                    self.submit(Job::Restore {
+                                        source: RestoreSource::Archive(id.clone()),
+                                    });
+                                }
+                            },
+                        );
+                        ui.end_row();
+                    }
                 });
-            }
         }
     }
 
@@ -1638,7 +1760,12 @@ impl App {
         section(ui, "Elevation");
         panel_card(ui, tone, |ui| {
             if self.elevated_ready {
-                ui.label(RichText::new("Background task registered").strong().size(13.0));
+                ui.label(
+                    RichText::new("Background task registered")
+                        .strong()
+                        .size(13.0)
+                        .color(ui.visuals().text_color()),
+                );
                 ui.label(
                     RichText::new("Applying a mode does not prompt for administrator rights.")
                         .size(11.5)
@@ -1646,7 +1773,10 @@ impl App {
                 );
             } else {
                 ui.label(
-                    RichText::new("Administrator rights needed once").strong().size(13.0),
+                    RichText::new("Administrator rights needed once")
+                        .strong()
+                        .size(13.0)
+                        .color(ui.visuals().text_color()),
                 );
                 ui.label(
                     RichText::new(

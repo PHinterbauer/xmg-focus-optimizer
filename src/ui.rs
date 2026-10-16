@@ -251,6 +251,8 @@ impl App {
             setup_attempted: false,
             setup_rx: None,
             interactive: !autostarted && !start_hidden,
+            history_ids: Vec::new(),
+            history_rows: Vec::new(),
         };
 
         if start_hidden {

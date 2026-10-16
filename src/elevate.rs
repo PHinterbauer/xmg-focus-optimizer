@@ -158,8 +158,11 @@ pub fn register_worker_task() -> Result<(), String> {
     );
 
     let path = std::env::temp_dir().join("xmg-task.xml");
-    std::fs::write(&path, xml.encode_utf16().flat_map(|c| c.to_le_bytes()))
-        .map_err(|e| e.to_string())?;
+    let wide: Vec<u8> = xml
+        .encode_utf16()
+        .flat_map(|c| c.to_le_bytes())
+        .collect();
+    std::fs::write(&path, wide).map_err(|e| e.to_string())?;
     let out = crate::sysutil::silent_command("schtasks")
         .args([
             "/create",

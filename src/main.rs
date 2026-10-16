@@ -27,6 +27,7 @@ mod power;
 mod profile;
 mod startup;
 mod sysutil;
+mod temps;
 mod theme;
 #[cfg(test)]
 mod tests;

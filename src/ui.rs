@@ -31,6 +31,7 @@ use crate::worker;
 enum Tab {
     Dashboard,
     Backups,
+    History,
     Settings,
 }
 
@@ -40,6 +41,7 @@ impl Tab {
         match self {
             Tab::Dashboard => "Dashboard",
             Tab::Backups => "Backups",
+            Tab::History => "History",
             Tab::Settings => "Settings",
         }
     }
@@ -50,6 +52,7 @@ impl Tab {
         match self {
             Tab::Dashboard => "Pick a profile, or let the charger decide.",
             Tab::Backups => "Every change is snapshotted before it happens.",
+            Tab::History => "What changed and when, newest first.",
             Tab::Settings => "How the app behaves, and how it looks.",
         }
     }
@@ -113,6 +116,10 @@ pub struct App {
     /// The window-close button only hides to the tray; without this flag the
     /// app would have no way to tell "hide" apart from "quit".
     quit_requested: bool,
+    /// Latest temperature readings, refreshed on a background thread. The UI
+    /// only ever peeks with `try_lock`, so a slow sensor cannot stall a frame.
+    temps: Arc<std::sync::Mutex<crate::temps::Temps>>,
+    temps_stop: Arc<AtomicBool>,
 }
 
 impl App {
@@ -130,6 +137,7 @@ impl App {
     ) -> Self {
         let on_ac = crate::power::on_ac_power();
         let (snapshots, archives, backup_dir, has_factory) = Self::state().unwrap_or_default();
+        let (temps, temps_stop) = crate::temps::spawn();
 
         let mut app = App {
             ctx,
@@ -159,6 +167,8 @@ impl App {
             _tx_monitor: tx_monitor,
             stop_watch,
             quit_requested: false,
+            temps,
+            temps_stop,
         };
 
         if start_hidden {
@@ -373,6 +383,7 @@ impl App {
                 }
                 TrayCommand::Quit => {
                     self.stop_watch.store(true, Ordering::Relaxed);
+                    self.temps_stop.store(true, Ordering::Relaxed);
                     self.quit_requested = true;
                     self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -554,6 +565,7 @@ impl eframe::App for App {
                 for (t, label, hint) in [
                     (Tab::Dashboard, "Dashboard", "Quiet and Performance"),
                     (Tab::Backups, "Backups", "Snapshots and restore"),
+                    (Tab::History, "History", "What changed and when"),
                     (Tab::Settings, "Settings", "Behaviour and appearance"),
                 ] {
                     if nav_item(ui, self.tab == t, label, hint, tone) {
@@ -569,6 +581,7 @@ impl eframe::App for App {
                     ui.add_space(10.0);
                     if ui.button("Quit").clicked() {
                         self.stop_watch.store(true, Ordering::Relaxed);
+                        self.temps_stop.store(true, Ordering::Relaxed);
                         self.quit_requested = true;
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -637,6 +650,18 @@ impl eframe::App for App {
                             pill(ui, "Mains power", true);
                         } else {
                             pill(ui, "On battery", false);
+                        }
+                        // Live temperatures, peeked without blocking: the
+                        // poller thread owns the data and the UI only reads.
+                        // A pill is shown only while its sensor answers, so a
+                        // machine with no CPU sensor simply shows the GPU.
+                        if let Ok(t) = self.temps.try_lock() {
+                            if let Some(g) = t.gpu {
+                                pill(ui, &format!("GPU {g:.0}°"), g < 80.0);
+                            }
+                            if let Some(c) = t.cpu {
+                                pill(ui, &format!("CPU {c:.0}°"), c < 85.0);
+                            }
                         }
                         if self.elevated_ready {
                             pill(ui, "Background task ready", true);
@@ -717,6 +742,7 @@ impl eframe::App for App {
                     match self.tab {
                         Tab::Dashboard => self.dashboard(ui),
                         Tab::Backups => self.backups(ui),
+                        Tab::History => self.history(ui),
                         Tab::Settings => self.settings_tab(ui),
                     }
                 });
@@ -725,6 +751,7 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.stop_watch.store(true, Ordering::Relaxed);
+        self.temps_stop.store(true, Ordering::Relaxed);
         let _ = self.settings.save();
     }
 }
@@ -1661,6 +1688,72 @@ impl App {
         }
     }
 
+    // -------------------------------------------------------------- history --
+
+    /// Read-only timeline of everything the app did, derived from the
+    /// snapshots: every apply and every restore snapshots first, so the list
+    /// is complete without any extra bookkeeping. Restoring stays on the
+    /// Backups tab; this page answers "what happened", not "undo it".
+    fn history(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+
+        if self.snapshots.is_empty() {
+            panel_card(ui, accent(Mode::Quiet, ui.visuals().dark_mode), |ui| {
+                ui.label(
+                    RichText::new("No activity yet.")
+                        .strong()
+                        .size(14.0)
+                        .color(ui.visuals().text_color()),
+                );
+                ui.label(
+                    RichText::new(
+                        "The first entry appears the first time a mode is applied \
+                         or a snapshot is taken.",
+                    )
+                    .size(12.0)
+                    .color(ui.visuals().weak_text_color()),
+                );
+            });
+            return;
+        }
+
+        ui.label(
+            RichText::new(format!(
+                "{} events - automatic snapshots are trimmed past 40, manual ones never",
+                self.snapshots.len()
+            ))
+            .size(11.5)
+            .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(6.0);
+
+        egui::Grid::new("history-rows")
+            .num_columns(3)
+            .spacing([14.0, 6.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for s in &self.snapshots {
+                    ui.label(
+                        RichText::new(s.created.clone())
+                            .size(12.0)
+                            .color(ui.visuals().text_color()),
+                    );
+                    ui.label(
+                        RichText::new(backup::describe_reason(&s.label)).size(12.0),
+                    );
+                    ui.label(
+                        RichText::new(match s.kind {
+                            backup::SnapshotKind::Automatic => "auto",
+                            backup::SnapshotKind::Manual => "manual",
+                        })
+                        .size(11.0)
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                    ui.end_row();
+                }
+            });
+    }
+
     // ------------------------------------------------------------- settings --
 
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
@@ -1811,6 +1904,7 @@ impl App {
             }
             if ui.button("Quit").clicked() {
                 self.stop_watch.store(true, Ordering::Relaxed);
+                self.temps_stop.store(true, Ordering::Relaxed);
                 self.quit_requested = true;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }

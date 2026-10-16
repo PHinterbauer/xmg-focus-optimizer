@@ -245,6 +245,39 @@ fn restore_source_rejects_traversal_attempts() {
     }
 }
 
+// ------------------------------------------------------- history reasons --
+
+#[test]
+fn snapshot_reasons_get_human_sentences() {
+    assert_eq!(
+        backup::describe_reason("before-quiet"),
+        "Before applying Quiet"
+    );
+    assert_eq!(
+        backup::describe_reason("before-performance"),
+        "Before applying Performance"
+    );
+    assert_eq!(
+        backup::describe_reason("before-restore"),
+        "Before restoring a snapshot"
+    );
+    assert_eq!(
+        backup::describe_reason("before-restore-to-initial"),
+        "Before restoring the initial backup"
+    );
+    assert_eq!(backup::describe_reason("manual"), "Manual snapshot");
+    assert_eq!(backup::describe_reason("cli"), "Command-line snapshot");
+}
+
+#[test]
+fn unknown_reasons_fall_back_plainly() {
+    // A new code path must not leak its internal slug into the UI, and must
+    // not fail either.
+    let s = backup::describe_reason("before-something-new");
+    assert!(s.contains("before-something-new"), "got {s:?}");
+    assert!(!s.contains('_'), "got {s:?}");
+}
+
 // ------------------------------------------------------------- guid parsing --
 
 #[test]

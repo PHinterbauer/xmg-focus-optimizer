@@ -95,6 +95,24 @@ fn kind_tag(k: SnapshotKind) -> &'static str {
     }
 }
 
+/// Turns a snapshot reason into a sentence for the History tab.
+///
+/// Reasons are written by the code paths that take the snapshot
+/// (`before-quiet`, `before-restore`, `manual`, `cli`, …), so every known one
+/// is matched explicitly and anything new falls back to a plain rendering
+/// rather than leaking an internal slug into the UI.
+pub fn describe_reason(reason: &str) -> String {
+    match reason {
+        "before-quiet" => "Before applying Quiet".into(),
+        "before-performance" => "Before applying Performance".into(),
+        "before-restore" => "Before restoring a snapshot".into(),
+        "before-restore-to-initial" => "Before restoring the initial backup".into(),
+        "manual" => "Manual snapshot".into(),
+        "cli" => "Command-line snapshot".into(),
+        other => format!("Snapshot ({other})"),
+    }
+}
+
 /// Removes only *automatic* snapshots beyond the limit. Never touches manual
 /// snapshots and never touches anything outside the snapshots folder.
 fn trim_snapshots(dir: &Path, _kind: SnapshotKind) {

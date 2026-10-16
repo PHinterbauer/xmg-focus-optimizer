@@ -88,6 +88,11 @@ impl DriftReport {
         let mut current = 0;
         let mut other = 0;
         for c in &self.checks {
+            // Rows where both columns agree (fixed pairs like the wake timers,
+            // the refresh rate) carry no source information and abstain.
+            if c.expected == c.alternative {
+                continue;
+            }
             match c.actual {
                 Some(v) if v == c.expected => current += 1,
                 Some(v) if v == c.alternative => other += 1,

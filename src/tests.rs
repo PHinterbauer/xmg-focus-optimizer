@@ -433,6 +433,9 @@ fn tolerant_check_stays_quiet_but_strict_gate_rewrites() {
         !report.fully_applied_strict(),
         "strict gate must demand the rewrite"
     );
+    // The two fixed pairs (wake timers, lid action) are identical on both
+    // power sources and abstain from the vote, so a uniformly stale scheme
+    // reads as the other source, not mixed.
     assert_eq!(report.values_source(), "mains values");
 }
 

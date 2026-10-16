@@ -266,6 +266,69 @@ fn extracts_a_guid_from_surrounding_text() {
     assert_eq!(power::extract_guid("nothing here"), None);
 }
 
+// ------------------------------------------------------- powercfg parsing --
+//
+// These use verbatim `powercfg` output captured from the target machine. Both
+// parsers have failed before in ways that looked like the machine was at
+// fault: the scheme list came back empty ("unknown scheme") and every setting
+// read as "not present".
+
+const SAMPLE_LIST: &str = "Existing Power Schemes (* Active)\n\
+    -----------------------------------\n\
+    Power Scheme GUID: 14eb49c1-04a4-4463-bf17-0dcd02ca9bca  (XMG Focus - Quiet)\n\
+    Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)\n\
+    Power Scheme GUID: b547e51d-720d-46a8-9b05-78f56a59fe89  (XMG Focus - Quiet) *\n";
+
+#[test]
+fn scheme_list_extracts_bare_guids_with_names() {
+    let schemes = power::parse_scheme_list(SAMPLE_LIST);
+    assert_eq!(schemes.len(), 3, "every line must parse, got {schemes:?}");
+    assert_eq!(
+        schemes[0],
+        (
+            "14eb49c1-04a4-4463-bf17-0dcd02ca9bca".to_string(),
+            "XMG Focus - Quiet".to_string()
+        )
+    );
+    assert_eq!(schemes[1].1, "Balanced");
+    // The active marker must not leak into the GUID or the name.
+    assert_eq!(schemes[2].0, "b547e51d-720d-46a8-9b05-78f56a59fe89");
+    assert!(power::is_guid(&schemes[2].0));
+}
+
+const SAMPLE_QH: &str = "Power Scheme GUID: b547e51d-720d-46a8-9b05-78f56a59fe89  (XMG Focus - Quiet)\n\
+  Subgroup GUID: 54533251-82be-4824-96c1-47b60b740d00  (Processor power management)\n\
+    Power Setting GUID: bc5038f7-23e0-4960-96da-33abaf5935ec  (Maximum processor state)\n\
+    Current AC Power Setting Index: 0x00000064\n\
+    Current DC Power Setting Index: 0x00000064\n\
+    Power Setting GUID: 893dee8e-2bef-41e0-89c6-b55d0929964c  (Minimum processor state)\n\
+    Current AC Power Setting Index: 0x00000005\n\
+    Current DC Power Setting Index: 0x00000005\n";
+
+#[test]
+fn qh_parse_keys_settings_by_bare_guid() {
+    let map = power::parse_qh(SAMPLE_QH);
+    assert_eq!(map.len(), 2, "both settings must parse, got {map:?}");
+    let max = &map["bc5038f7-23e0-4960-96da-33abaf5935ec"];
+    assert_eq!((max.ac, max.dc), (100, 100));
+    assert_eq!(max.subgroup, "54533251-82be-4824-96c1-47b60b740d00");
+    let min = &map["893dee8e-2bef-41e0-89c6-b55d0929964c"];
+    assert_eq!((min.ac, min.dc), (5, 5));
+}
+
+#[test]
+fn qh_parse_roundtrips_through_backup_format() {
+    // The snapshot writer and the backup parser must agree: this is what made
+    // old snapshots unrestorable (three fields written, four required).
+    let map = power::parse_qh(SAMPLE_QH);
+    let mut body = String::new();
+    for (setting, v) in &map {
+        body.push_str(&format!("{}|{setting}|{}|{}\n", v.subgroup, v.ac, v.dc));
+    }
+    let rows = backup::parse_backup(&body);
+    assert_eq!(rows.len(), 2, "written snapshots must parse back");
+}
+
 // ------------------------------------------------------------- drift logic --
 
 #[test]

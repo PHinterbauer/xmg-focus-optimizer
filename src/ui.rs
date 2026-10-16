@@ -109,6 +109,10 @@ pub struct App {
     tx_tray: Sender<TrayCommand>,
     _tx_monitor: Sender<MonitorEvent>,
     stop_watch: Arc<AtomicBool>,
+    /// Set when the user asked to quit for real (tray menu or Quit button).
+    /// The window-close button only hides to the tray; without this flag the
+    /// app would have no way to tell "hide" apart from "quit".
+    quit_requested: bool,
 }
 
 impl App {
@@ -154,6 +158,7 @@ impl App {
             tx_tray,
             _tx_monitor: tx_monitor,
             stop_watch,
+            quit_requested: false,
         };
 
         if start_hidden {
@@ -365,6 +370,7 @@ impl App {
                 }
                 TrayCommand::Quit => {
                     self.stop_watch.store(true, Ordering::Relaxed);
+                    self.quit_requested = true;
                     self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             }
@@ -436,6 +442,16 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
+        // The window-close (X) button hides to the tray instead of quitting.
+        // A real quit only happens through the tray menu, a Quit button, or
+        // Task Manager. Without this the X button kills the background watcher
+        // along with the window.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quit_requested {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.hide_to_tray();
+            log_info!("window close intercepted - hiding to tray");
+        }
+
         // --- theme ---------------------------------------------------------
         //
         // Both palettes are installed every time, and the preference is set
@@ -475,7 +491,10 @@ impl eframe::App for App {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_black_alpha(if dark { 255 } else { 250 }))
+                    // The rail follows the theme. It used to be hardcoded
+                    // black, which left a black sidebar floating in an
+                    // otherwise white window in light mode.
+                    .fill(crate::theme::panel_bg(dark))
                     .inner_margin(Margin::symmetric(14, 16))
                     .stroke(egui::Stroke::new(
                         1.0,
@@ -519,6 +538,7 @@ impl eframe::App for App {
                     ui.add_space(10.0);
                     if ui.button("Quit").clicked() {
                         self.stop_watch.store(true, Ordering::Relaxed);
+                        self.quit_requested = true;
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                     if ui.button("Hide to tray").clicked() {
@@ -526,7 +546,7 @@ impl eframe::App for App {
                     }
                     ui.add_space(12.0);
                     ui.label(
-                        RichText::new("v1.0.2")
+                        RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                             .size(11.5)
                             .color(ui.visuals().weak_text_color()),
                     );
@@ -606,7 +626,7 @@ impl eframe::App for App {
             .exact_size(30.0)
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_black_alpha(if dark { 255 } else { 246 }))
+                    .fill(crate::theme::panel_bg(dark))
                     .inner_margin(Margin::symmetric(20, 6))
                     .stroke(egui::Stroke::new(
                         1.0,
@@ -718,12 +738,18 @@ fn nav_item(
                 .fill(if selected {
                     tone.gamma_multiply(if dark { 0.26 } else { 0.10 })
                 } else {
-                    egui::Color32::TRANSPARENT
+                    // Unselected rows keep a quiet card fill and hairline so
+                    // they still read as buttons. Fully transparent rows looked
+                    // like plain labels in the screenshots.
+                    crate::theme::card_bg(dark)
                 })
                 .stroke(if selected {
                     egui::Stroke::new(1.0, tone.gamma_multiply(0.5))
                 } else {
-                    egui::Stroke::NONE
+                    egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    )
                 })
                 .corner_radius(CornerRadius::same(8))
                 .min_size(Vec2::new(ui.available_width(), 26.0)),
@@ -1607,6 +1633,7 @@ impl App {
             }
             if ui.button("Quit").clicked() {
                 self.stop_watch.store(true, Ordering::Relaxed);
+                self.quit_requested = true;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
             ui.label(

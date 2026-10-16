@@ -6,6 +6,11 @@
 //! Commands:   `apply`, `restore`, `snapshot`, `factory`, `help`
 //! Internals:  `--worker`, `--setup-elevated`, `--tray`
 
+// No console window. Without this Windows opens a terminal alongside the GUI
+// on every launch, which is exactly the flashing cmd window from the bug
+// report. CLI output still works when started from an existing terminal.
+#![windows_subsystem = "windows"]
+
 mod backup;
 mod config;
 mod drift;
@@ -85,8 +90,7 @@ fn main() {
     run_gui(
         lowered.iter().any(|a| a == "--tray"),
         lowered.iter().any(|a| a == "--autostart"),
-    );
-}
+    );}
 
 fn run_worker() {
     // This process is invisible to the user: launched by the scheduled task at
@@ -229,7 +233,13 @@ fn run_gui(start_hidden: bool, autostarted: bool) {
     let (tx_monitor, rx_monitor) = channel::<monitor::MonitorEvent>();
     let stop_watch = monitor::spawn(settings.clone(), tx_monitor.clone());
 
-    let hidden = start_hidden || settings.start_minimized_to_tray;
+    // A plain double-click opens the window. The window only starts hidden
+    // when it was launched hidden on purpose: `--tray`, or `--autostart` from
+    // the Run key (silent re-apply), or the stored "start in tray" preference.
+    // The old code OR-ed in `start_minimized_to_tray` whose default was true,
+    // so every first launch flashed the window and dropped straight to tray.
+    let hidden =
+        start_hidden || autostarted || settings.start_minimized_to_tray;
 
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -243,7 +253,10 @@ fn run_gui(start_hidden: bool, autostarted: bool) {
             // like a web page in a box rather than a program.
             .with_decorations(true)
             .with_resizable(true)
-            .with_app_id("xmg-focus-optimizer"),
+            .with_app_id("xmg-focus-optimizer")
+            // The logo in the title bar. Without this Windows shows its
+            // generic placeholder, which is why the top-left icon was missing.
+            .with_icon(crate::icon::window_icon()),
         ..Default::default()
     };
 

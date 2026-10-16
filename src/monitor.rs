@@ -9,6 +9,7 @@ use std::time::Duration;
 use crate::config::Settings;
 use crate::elevate;
 use crate::jobs::Job;
+use crate::log::log_warn;
 use crate::profile::Mode;
 use crate::sysutil;
 
@@ -53,11 +54,19 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
                     continue;
                 }
 
-                elevate::submit(Job::Apply {
+                // Silent by design: this runs on a background thread with no
+                // window to explain a UAC prompt, so a prompt here would just
+                // appear out of nowhere on every plug and unplug.
+                if !elevate::submit_silent(Job::Apply {
                     mode: live.mode,
                     control_fans: live.control_fans,
                     control_gpu: live.control_gpu_limit,
-                });
+                }) {
+                    log_warn!(
+                        "auto-switch skipped: background task not registered; \
+                         use Finish setup so charger changes apply silently"
+                    );
+                }
 
                 let _ = tx.send(MonitorEvent::PowerChanged {
                     on_ac,

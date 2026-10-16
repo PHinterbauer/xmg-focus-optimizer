@@ -56,23 +56,31 @@ pub fn is_admin() -> bool {
 }
 
 /// `powercfg /list`, as (guid, name) pairs.
+///
+/// The line looks like `Power Scheme GUID: <guid>  (Name)`. The GUID is pulled
+/// out with [`extract_guid`] rather than by splitting on the parenthesis, which
+/// is what used to leave the `Power Scheme GUID: ` prefix attached. That made
+/// every entry fail the length check, so the list came back empty, every scheme
+/// read as "unknown", and our own old schemes were never cleaned up.
 pub fn list_schemes() -> Vec<(String, String)> {
-    let mut out = Vec::new();
     let Ok(txt) = powercfg(&["/list"]) else {
-        return out;
+        return Vec::new();
     };
+    parse_scheme_list(&txt)
+}
+
+/// Pure parser behind [`list_schemes`], kept separate so tests can feed it real
+/// `powercfg` output without running anything.
+pub(crate) fn parse_scheme_list(txt: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
     for line in txt.lines() {
         let t = line.trim();
-        let Some(open) = t.find('(') else { continue };
-        let Some(close) = t.rfind(')') else { continue };
-        if close < open {
-            continue;
-        }
-        let guid = t[..open].trim();
-        let name = &t[open + 1..close];
-        if guid.len() == 36 && guid.chars().filter(|c| *c == '-').count() == 4 {
-            out.push((guid.to_string(), name.to_string()));
-        }
+        let Some(guid) = extract_guid(t) else { continue };
+        let name = match (t.find('('), t.rfind(')')) {
+            (Some(open), Some(close)) if close > open => t[open + 1..close].to_string(),
+            _ => String::new(),
+        };
+        out.push((guid, name));
     }
     out
 }
@@ -121,33 +129,57 @@ pub fn set_value(
 }
 
 /// One setting read back from a scheme.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Value {
+    pub subgroup: String,
     pub ac: u32,
     pub dc: u32,
 }
 
 /// Reads every setting of a scheme into a map keyed by setting GUID.
+///
+/// Both the subgroup and the setting lines carry a trailing ` (Name)` after
+/// the GUID, so the GUID is extracted with [`extract_guid`]. Matching the whole
+/// line instead is what used to store keys like
+/// `bc5038f7-… (CPU maximum state)`, which never equalled a bare GUID lookup -
+/// every setting read as "not present".
 pub fn read_all(scheme: &str) -> HashMap<String, Value> {
-    let mut map = HashMap::new();
     let Ok(txt) = powercfg(&["/qh", scheme]) else {
-        return map;
+        return HashMap::new();
     };
+    parse_qh(&txt)
+}
 
+/// Pure parser behind [`read_all`], kept separate so tests can feed it real
+/// `powercfg` output without running anything.
+pub(crate) fn parse_qh(txt: &str) -> HashMap<String, Value> {
+    let mut map = HashMap::new();
+    let mut sub_guid = String::new();
     let mut set_guid = String::new();
     let mut ac: Option<u32> = None;
 
     for line in txt.lines() {
         let l = line.trim();
-        if let Some(g) = after(l, "Power Setting GUID:") {
-            set_guid = g.to_ascii_lowercase();
+        if l.starts_with("Subgroup GUID:") {
+            sub_guid = extract_guid(l).unwrap_or_default();
+            set_guid.clear();
+            ac = None;
+        } else if l.starts_with("Power Setting GUID:") {
+            set_guid = extract_guid(l).unwrap_or_default();
             ac = None;
         } else if let Some(v) = hex_after(l, "Current AC Power Setting Index:") {
             ac = Some(v);
         } else if let Some(v) = hex_after(l, "Current DC Power Setting Index:") {
-            if let (Some(a), Some(s)) = (ac, Some(set_guid.clone())) {
-                if !s.is_empty() {
-                    map.insert(s, Value { ac: a, dc: v });
+            if let Some(a) = ac {
+                if !set_guid.is_empty() {
+                    map.insert(
+                        set_guid.clone(),
+                        Value {
+                            subgroup: sub_guid.clone(),
+                            ac: a,
+                            dc: v,
+                        },
+                    );
                 }
             }
         }

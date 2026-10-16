@@ -251,6 +251,20 @@ pub fn texture(ctx: &egui::Context, dark: bool) -> egui::TextureHandle {
     .clone()
 }
 
+/// Title-bar icon, drawn by the same code as the tray icon.
+///
+/// `IconData` wants unmultiplied RGBA, which is exactly what the buffer holds.
+pub fn window_icon() -> egui::IconData {
+    let size = 64u32;
+    let variant = Variant::Dark;
+    let px = draw(size, variant).px;
+    egui::IconData {
+        rgba: px,
+        width: size,
+        height: size,
+    }
+}
+
 /// Windows icon handle for the tray, following the theme.
 ///
 /// `None` only when the pixel data is rejected, which would indicate a bug in

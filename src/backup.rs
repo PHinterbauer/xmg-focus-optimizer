@@ -63,7 +63,10 @@ pub fn snapshot(kind: SnapshotKind, reason: &str) -> AppResult<SnapshotInfo> {
 
     let mut body = String::new();
     for (setting, v) in &values {
-        body.push_str(&format!("{setting}|{}|{}\n", v.ac, v.dc));
+        // Four fields: subgroup|setting|ac|dc. The subgroup is required -
+        // `parse_backup` rejects anything else, so a three-field file
+        // could never be restored.
+        body.push_str(&format!("{}|{setting}|{}|{}\n", v.subgroup, v.ac, v.dc));
     }
     // Header comment so a snapshot is readable on its own.
     let mut final_text = format!(
@@ -302,7 +305,10 @@ fn write_current_factory(base: &Path) -> AppResult<()> {
 
     let mut body = String::new();
     for (setting, v) in &values {
-        body.push_str(&format!("{setting}|{}|{}\n", v.ac, v.dc));
+        // Four fields: subgroup|setting|ac|dc. The subgroup is required -
+        // `parse_backup` rejects anything else, so a three-field file
+        // could never be restored.
+        body.push_str(&format!("{}|{setting}|{}|{}\n", v.subgroup, v.ac, v.dc));
     }
     fs::write(base.join(paths::FACTORY_MARKER), body)
         .map_err(|e| AppError::Io(format!("factory settings: {e}")))?;

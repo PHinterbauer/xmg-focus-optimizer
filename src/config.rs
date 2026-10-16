@@ -64,10 +64,11 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             mode: Mode::Quiet,
-            // On by default: the app keeps the laptop right when the charger comes
-            // out mid-session, without you having to open it.
+            // Off by default: a plain double-click must open the window. Hiding
+            // on launch used to be the default, which is why the window flashed
+            // open and dropped straight to the tray on first run.
             start_with_system: true,
-            start_minimized_to_tray: true,
+            start_minimized_to_tray: false,
             auto_switch_on_power_change: true,
             notify_on_auto_switch: false,
             confirm_before_apply: false,

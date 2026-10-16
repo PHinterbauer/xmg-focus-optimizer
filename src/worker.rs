@@ -120,11 +120,15 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: 
     let on_ac = power::on_ac_power();
     let (params, entries) = profile::plan(mode, on_ac);
 
-    // Idempotence: if the active scheme is already ours for this mode and every
-    // setting matches, leave it completely alone. This is what makes the
-    // start-up re-apply a genuine no-op rather than a rewrite.
-    let report = crate::drift::check(mode, on_ac);
-    if report.fully_applied() {
+    // Idempotence: if the active scheme already holds this mode's values for
+    // the *current* power source, leave it completely alone. This is what
+    // makes the start-up re-apply a genuine no-op rather than a rewrite.
+    //
+    // The gate is deliberately strict (see fully_applied_strict), not the
+    // tolerant UI check: tolerance would accept stale mains values on battery
+    // and skip the very rewrite an auto-switch exists to perform.
+    let report = crate::drift::check(mode, on_ac, control_display);
+    if report.fully_applied_strict() {
         r.details.push(format!(
             "Power settings already correct - nothing to change ({} of {} verified)",
             report.total() - report.drifted(),

@@ -390,6 +390,90 @@ fn qh_parse_roundtrips_through_backup_format() {
 
 // ------------------------------------------------------------- drift logic --
 
+/// Builds a drift report out of thin air: every check holds `actual`, the
+/// mode is Quiet, the scheme is managed. No powercfg involved, so this runs
+/// anywhere - including headless CI.
+fn synthetic_report(on_ac: bool, actual: Vec<Option<(u32, u32)>>) -> drift::DriftReport {
+    let (_, entries) = profile::plan(Mode::Quiet, on_ac);
+    let (_, other) = profile::plan(Mode::Quiet, !on_ac);
+    let checks = entries
+        .iter()
+        .zip(other.iter())
+        .zip(actual.iter())
+        .map(|((a, b), v)| drift::SettingCheck {
+            label: a.label,
+            expected: (a.ac, a.dc),
+            alternative: (b.ac, b.dc),
+            actual: *v,
+            consistent: matches!(v, Some(x) if *x == (a.ac, a.dc) || *x == (b.ac, b.dc)),
+        })
+        .collect();
+    drift::DriftReport {
+        mode: Mode::Quiet,
+        on_ac,
+        scheme_name: "XMG Focus - Quiet".into(),
+        managed: true,
+        checks,
+    }
+}
+
+#[test]
+fn tolerant_check_stays_quiet_but_strict_gate_rewrites() {
+    // The exact auto-switch failure: on battery with mains values still in
+    // the scheme, the tolerant UI check must stay clean (no false alarm)
+    // while the worker's strict gate must refuse the no-op so the battery
+    // values actually get written.
+    let (_, entries) = profile::plan(Mode::Quiet, true);
+    let actual: Vec<Option<(u32, u32)>> =
+        entries.iter().map(|e| Some((e.ac, e.dc))).collect();
+    let report = synthetic_report(false, actual);
+    assert!(report.is_clean(), "tolerant check must not nag");
+    assert!(report.fully_applied(), "tolerant gate stays as it was");
+    assert!(
+        !report.fully_applied_strict(),
+        "strict gate must demand the rewrite"
+    );
+    assert_eq!(report.values_source(), "mains values");
+}
+
+#[test]
+fn strict_gate_passes_once_values_match_the_source() {
+    let (_, entries) = profile::plan(Mode::Quiet, false);
+    let actual: Vec<Option<(u32, u32)>> =
+        entries.iter().map(|e| Some((e.ac, e.dc))).collect();
+    let report = synthetic_report(false, actual);
+    assert!(report.fully_applied_strict());
+    assert_eq!(report.values_source(), "battery values");
+}
+
+#[test]
+fn values_source_reports_mixed_and_mains() {
+    let (_, entries) = profile::plan(Mode::Quiet, true);
+    // Half current, half other.
+    let actual: Vec<Option<(u32, u32)>> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let (_, other) = profile::plan(Mode::Quiet, false);
+            if i % 2 == 0 {
+                Some((e.ac, e.dc))
+            } else {
+                Some((other[i].ac, other[i].dc))
+            }
+        })
+        .collect();
+    // Quiet AC and DC differ in at least CPU cap, so this is genuinely mixed
+    // unless the profiles happen to agree everywhere.
+    let report = synthetic_report(true, actual);
+    let (_, dc_entries) = profile::plan(Mode::Quiet, false);
+    let differs = entries
+        .iter()
+        .zip(dc_entries.iter())
+        .any(|(a, b)| (a.ac, a.dc) != (b.ac, b.dc));
+    assert!(differs, "test needs AC/DC profiles to differ");
+    assert_eq!(report.values_source(), "mixed values");
+}
+
 #[test]
 fn a_setting_matching_the_other_power_source_is_not_drift() {
     // This is the AC/DC tolerance: a scheme written on mains legitimately holds

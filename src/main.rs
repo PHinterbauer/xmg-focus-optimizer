@@ -132,7 +132,10 @@ fn run_worker() {
     }
 
     jobs::write_result(&result);
-    jobs::clear_pending();
+    // Only the queued job is removed here. The result must stay on disk until
+    // the GUI picks it up with take_result - deleting both (clear_pending)
+    // almost always wins the race against the UI poll and leaves it waiting.
+    jobs::clear_job();
     log_info!("worker exiting");
 }
 

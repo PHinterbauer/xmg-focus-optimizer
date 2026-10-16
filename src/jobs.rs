@@ -88,3 +88,13 @@ pub fn clear_pending() {
     let _ = std::fs::remove_file(paths::job_result_path());
     let _ = std::fs::remove_file(paths::job_path());
 }
+
+/// Removes only the queued job, keeping a written result in place.
+///
+/// The worker must use this after `write_result`, never `clear_pending`:
+/// deleting the result in the same breath as writing it wins the race against
+/// the GUI's poll almost every time, and the UI then waits on a file that will
+/// never appear - the "Applying…" state never clears.
+pub fn clear_job() {
+    let _ = std::fs::remove_file(paths::job_path());
+}

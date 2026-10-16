@@ -239,7 +239,11 @@ impl App {
     }
 
     fn recheck_drift(&mut self) {
-        let d = drift::check(self.settings.mode, self.on_ac);
+        let d = drift::check(
+            self.settings.mode,
+            self.on_ac,
+            self.settings.control_display,
+        );
         log_debug!(
             "drift check: {}/{} settings consistent, managed={}, scheme={:?}",
             d.total() - d.drifted(),
@@ -1226,9 +1230,10 @@ impl App {
                 if clean && managed {
                     ui.label(
                         RichText::new(format!(
-                            "All {} settings match {}.",
+                            "All {} settings match {} ({}).",
                             report.total(),
-                            report.mode.label()
+                            report.mode.label(),
+                            report.values_source()
                         ))
                         .strong()
                         .size(13.0)

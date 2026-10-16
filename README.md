@@ -99,7 +99,7 @@ XMG-Backup/
 
 ## Consistency check
 
-The Dashboard compares **all 17 settings** against what the selected mode should produce for the
+The Dashboard compares **all 17 power settings plus the display refresh rate** against what the selected mode should produce for the
 current power source. When something disagrees, the app changes nothing until you choose:
 
 - **Change to Quiet / Performance** &mdash; rewrite the settings to match the mode

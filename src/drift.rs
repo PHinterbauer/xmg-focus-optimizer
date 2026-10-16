@@ -61,6 +61,56 @@ impl DriftReport {
         self.is_clean() && self.managed
     }
 
+    /// Strict variant for the worker's idempotence gate: every setting must
+    /// equal the values for the *current* power source, not merely either
+    /// column.
+    ///
+    /// The tolerant `fully_applied` is what the UI shows, so moving to battery
+    /// does not nag about mains values still being in the scheme. But the
+    /// worker must not use it to skip writes: after unplugging, the mains
+    /// values read as "consistent" through the tolerance, and an auto-switch
+    /// built on that gate would announce the mode while never writing the
+    /// battery values. This gate is what actually flips the numbers.
+    pub fn fully_applied_strict(&self) -> bool {
+        self.managed
+            && self.checks.iter().all(|c| match c.actual {
+                Some(v) => v == c.expected,
+                None => false,
+            })
+    }
+
+    /// Which power source's numbers the scheme actually holds: the current
+    /// one, the other one, or a mix. Used to annotate the headline, so
+    /// "matches Quiet" also says *which* Quiet - mains values or battery
+    /// values. A stale scheme after unplugging reads as the other source
+    /// until the worker rewrites it.
+    pub fn values_source(&self) -> &'static str {
+        let mut current = 0;
+        let mut other = 0;
+        for c in &self.checks {
+            match c.actual {
+                Some(v) if v == c.expected => current += 1,
+                Some(v) if v == c.alternative => other += 1,
+                _ => return "mixed values",
+            }
+        }
+        if current > 0 && other == 0 {
+            if self.on_ac {
+                "mains values"
+            } else {
+                "battery values"
+            }
+        } else if other > 0 && current == 0 {
+            if self.on_ac {
+                "battery values"
+            } else {
+                "mains values"
+            }
+        } else {
+            "mixed values"
+        }
+    }
+
     pub fn drifted_labels(&self) -> Vec<&'static str> {
         self.checks
             .iter()
@@ -74,7 +124,12 @@ impl DriftReport {
 const SCHEME_PREFIX: &str = "XMG Focus - ";
 
 /// Inspects the active scheme against `mode`.
-pub fn check(mode: Mode, on_ac: bool) -> DriftReport {
+///
+/// `check_display` adds the refresh rate as one more row. It is a separate
+/// flag (rather than always on) so disabling display control in Settings also
+/// silences it instead of nagging forever about a value the app was told not
+/// to touch.
+pub fn check(mode: Mode, on_ac: bool, check_display: bool) -> DriftReport {
     let (scheme_guid, scheme_name, managed) = match power::active_scheme() {
         Ok(guid) => {
             let name = power::list_schemes()
@@ -95,7 +150,7 @@ pub fn check(mode: Mode, on_ac: bool) -> DriftReport {
     let (_, now) = profile::plan(mode, on_ac);
     let (_, other) = profile::plan(mode, !on_ac);
 
-    let checks = now
+    let mut checks: Vec<SettingCheck> = now
         .iter()
         .zip(other.iter())
         .map(|(a, b)| {
@@ -117,6 +172,25 @@ pub fn check(mode: Mode, on_ac: bool) -> DriftReport {
             }
         })
         .collect();
+
+    // The refresh rate is not a power setting, so it cannot come from the
+    // plan rows above - but the consistency check would be lying by omission
+    // without it. A mode has one rate regardless of power source, so expected
+    // and alternative are the same pair. Skipped when the target cannot be
+    // discovered (headless CI, unreachable display) rather than reported.
+    if check_display {
+        if let Some(want) = crate::display::hz_for_mode(mode) {
+            let actual = crate::display::current_hz().map(|h| (h, h));
+            let expected = (want, want);
+            checks.push(SettingCheck {
+                label: "Refresh rate",
+                expected,
+                alternative: expected,
+                actual,
+                consistent: actual == Some(expected),
+            });
+        }
+    }
 
     DriftReport {
         mode,

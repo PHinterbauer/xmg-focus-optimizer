@@ -71,6 +71,73 @@ enum NoteKind {
     Err,
 }
 
+/// One rendered history row. Owned (not borrowed from `snapshots`) so the
+/// grid closure can call `self.submit(..)` for the Restore buttons without
+/// borrowing `self` twice - same pattern as the Backups rows.
+#[derive(Clone)]
+struct HistoryRow {
+    id: String,
+    created: String,
+    event: String,
+    mode: String,
+    kind: &'static str,
+    /// Power rows parsed from the snapshot file (0 when unreadable).
+    settings: usize,
+    /// Settings whose values differ from the next-older snapshot. `None` for
+    /// the oldest entry (nothing to compare against) and for unreadable files.
+    delta_prev: Option<usize>,
+}
+
+/// Builds render rows from the snapshot list, newest first. Reads each file
+/// once; callers cache the result keyed by snapshot id.
+fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
+    // Parsed oldest-first so each entry can diff against its predecessor;
+    // displayed newest-first as built by the caller order below.
+    let parsed: Vec<(SnapshotInfo, Vec<backup::RestoreRow>)> = snaps
+        .iter()
+        .map(|s| {
+            let rows = std::fs::read_to_string(&s.path)
+                .ok()
+                .map(|t| backup::parse_backup(&t))
+                .unwrap_or_default();
+            (s.clone(), rows)
+        })
+        .collect();
+
+    let n = parsed.len();
+    parsed
+        .into_iter()
+        .enumerate()
+        .map(|(i, (s, rows))| {
+            // Newest first in the UI, so the "previous" snapshot is the next
+            // one down the list.
+            let delta_prev = if i + 1 < n {
+                let older = std::fs::read_to_string(&snaps[i + 1].path)
+                    .ok()
+                    .map(|t| backup::parse_backup(&t))
+                    .unwrap_or_default();
+                Some(backup::count_changed(&older, &rows))
+            } else {
+                None
+            };
+            HistoryRow {
+                id: s.id.clone(),
+                created: s.created.clone(),
+                event: backup::describe_reason(&s.label),
+                mode: backup::snapshot_mode(&s.label)
+                    .map(|m| m.label().to_string())
+                    .unwrap_or_else(|| "—".into()),
+                kind: match s.kind {
+                    backup::SnapshotKind::Automatic => "auto",
+                    backup::SnapshotKind::Manual => "manual",
+                },
+                settings: rows.len(),
+                delta_prev,
+            }
+        })
+        .collect()
+}
+
 pub struct App {
     /// egui is cheap to clone, and holding it lets helpers send viewport
     /// commands before the first frame has been painted.
@@ -120,6 +187,18 @@ pub struct App {
     /// only ever peeks with `try_lock`, so a slow sensor cannot stall a frame.
     temps: Arc<std::sync::Mutex<crate::temps::Temps>>,
     temps_stop: Arc<AtomicBool>,
+    /// Rendered History rows plus the snapshot ids they were built from. The
+    /// file parsing behind them runs only when the list itself changes.
+    history_ids: Vec<String>,
+    history_rows: Vec<HistoryRow>,
+    /// Automatic one-time setup runs at most once per process, on a thread,
+    /// and only for interactive launches. Without the once-guard a denied UAC
+    /// prompt would reappear on every frame.
+    setup_attempted: bool,
+    setup_rx: Option<Receiver<Result<bool, String>>>,
+    /// True for a plain double-click. Login (`--autostart`) and `--tray`
+    /// launches stay silent: no automatic UAC prompt from a hidden window.
+    interactive: bool,
 }
 
 impl App {
@@ -169,6 +248,9 @@ impl App {
             quit_requested: false,
             temps,
             temps_stop,
+            setup_attempted: false,
+            setup_rx: None,
+            interactive: !autostarted && !start_hidden,
         };
 
         if start_hidden {
@@ -369,6 +451,29 @@ impl App {
     }
     /// Drains both channels. Runs whether or not the window is visible.
     fn poll_events(&mut self) {
+        // Collected first so the channel borrow ends before the &mut work.
+        let setup_done = self
+            .setup_rx
+            .as_ref()
+            .and_then(|rx| rx.try_recv().ok());
+        if let Some(result) = setup_done {
+            self.setup_rx = None;
+            match result {
+                Ok(true) => {
+                    self.elevated_ready = true;
+                    self.note("background task registered automatically", NoteKind::Ok);
+                }
+                Ok(false) => self.note(
+                    "automatic setup incomplete - retry in Settings → Elevation",
+                    NoteKind::Warn,
+                ),
+                Err(e) => self.note(
+                    format!("automatic setup declined or failed ({e}) - charger \
+                             auto-switch needs the task; retry in Settings → Elevation"),
+                    NoteKind::Warn,
+                ),
+            }
+        }
         while let Ok(cmd) = self.tray_rx.try_recv() {
             match cmd {
                 TrayCommand::Show => self.show_window(),
@@ -433,8 +538,8 @@ impl App {
                     self.note(
                         format!(
                             "charger changed to {} - settings NOT re-applied: \
-                             background task missing. Click Finish setup (or run \
-                             once as administrator).",
+                             background task missing. Open Settings → Elevation \
+                             → Set up now (or run once as administrator).",
                             if on_ac { "mains" } else { "battery" }
                         ),
                         NoteKind::Warn,
@@ -506,6 +611,24 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.hide_to_tray();
             log_info!("window close intercepted - hiding to tray");
+        }
+
+        // Automatic one-time setup, at most once per process and never
+        // blocking the UI thread: ensure_setup only prompts when something
+        // actually needs doing, and returns immediately when the task is
+        // already healthy. Login and tray launches stay silent on purpose -
+        // no UAC prompt out of a hidden window.
+        if self.interactive && !self.elevated_ready && !self.setup_attempted {
+            self.setup_attempted = true;
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.setup_rx = Some(rx);
+            std::thread::Builder::new()
+                .name("xmg-auto-setup".into())
+                .spawn(move || {
+                    let _ = tx.send(elevate::ensure_setup());
+                })
+                .ok();
+            log_info!("automatic setup started in the background");
         }
 
         // --- theme ---------------------------------------------------------
@@ -690,34 +813,27 @@ impl eframe::App for App {
                         // poller thread owns the data and the UI only reads.
                         // A pill is shown only while its sensor answers, so a
                         // machine with no CPU sensor simply shows the GPU.
+                        // Once the GPU has answered, a missing CPU reading is
+                        // shown explicitly as "CPU –" instead of silently
+                        // vanishing: polling works, the sensor just has no data.
                         if let Ok(t) = self.temps.try_lock() {
                             if let Some(g) = t.gpu {
                                 pill(ui, &format!("GPU {g:.0}°"), g < 80.0);
-                            }
-                            if let Some(c) = t.cpu {
-                                pill(ui, &format!("CPU {c:.0}°"), c < 85.0);
+                                if let Some(c) = t.cpu {
+                                    pill(ui, &format!("CPU {c:.0}°"), c < 85.0);
+                                } else {
+                                    pill_plain(ui, "CPU –");
+                                }
                             }
                         }
                         if self.elevated_ready {
                             pill(ui, "Background task ready", true);
-                        } else if ui
-                            .button("Finish setup")
-                            .on_hover_text(
-                                "Registers the background task once (a single UAC prompt). \
-                                 After that, applying modes and charger auto-switch run \
-                                 silently with no further prompts. Without it, every \
-                                 apply falls back to a UAC prompt.",
-                            )
-                            .clicked()
-                        {
-                            match elevate::ensure_setup() {
-                                Ok(true) => {
-                                    self.elevated_ready = true;
-                                    self.note("background task registered", NoteKind::Ok);
-                                }
-                                Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                                Err(e) => self.note(e, NoteKind::Err),
-                            }
+                        } else {
+                            // No button here on purpose: setup runs itself on
+                            // launch (see App::ui auto-setup). This pill is
+                            // only a status light for when that did not finish
+                            // - the way back is Settings → Elevation.
+                            pill_warn(ui, "Setup needed");
                         }
                         ui.add_space(4.0);
                     });
@@ -994,6 +1110,31 @@ fn pill(ui: &mut egui::Ui, text: &str, good: bool) {
     // Squared chip rather than a stadium pill, to match the buttons and cards.
     egui::Frame::new()
         .fill(c.gamma_multiply(0.18))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(12.0).color(c));
+        });
+}
+
+/// Neutral chip for states that are neither good nor bad: unknown sensor
+/// readings and pending setup. Same shape as [`pill`], no semantic colour.
+fn pill_plain(ui: &mut egui::Ui, text: &str) {
+    let c = ui.visuals().weak_text_color();
+    egui::Frame::new()
+        .fill(ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.25))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::symmetric(10, 4))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(12.0).color(c));
+        });
+}
+
+/// Amber chip for attention states. Same shape as [`pill`].
+fn pill_warn(ui: &mut egui::Ui, text: &str) {
+    let c = warn_color();
+    egui::Frame::new()
+        .fill(c.gamma_multiply(0.16))
         .corner_radius(CornerRadius::same(6))
         .inner_margin(Margin::symmetric(10, 4))
         .show(ui, |ui| {
@@ -1768,12 +1909,29 @@ impl App {
         );
         ui.add_space(6.0);
 
+        // Rebuilt only when the snapshot list itself changes: parsing every
+        // file on every frame would do real IO sixty times a second for
+        // content that barely moves.
+        let ids: Vec<String> = self.snapshots.iter().map(|s| s.id.clone()).collect();
+        if ids != self.history_ids {
+            self.history_rows = build_history_rows(&self.snapshots);
+            self.history_ids = ids;
+        }
+
         egui::Grid::new("history-rows")
-            .num_columns(4)
+            .num_columns(7)
             .spacing([14.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
-                for head in ["TIME", "EVENT", "MODE", "KIND"] {
+                for head in [
+                    "TIME",
+                    "EVENT",
+                    "MODE",
+                    "VALUES",
+                    "CHANGED",
+                    "KIND",
+                    "",
+                ] {
                     ui.label(
                         RichText::new(head)
                             .size(10.5)
@@ -1782,32 +1940,50 @@ impl App {
                     );
                 }
                 ui.end_row();
-                for s in &self.snapshots {
+                // Owned rows: the Restore button calls self.submit(..) inside
+                // the grid closure, which would borrow self twice off the live
+                // list. Same pattern as the Backups rows.
+                let rows = self.history_rows.clone();
+                for r in &rows {
                     ui.label(
-                        RichText::new(s.created.clone())
+                        RichText::new(r.created.clone())
+                            .size(12.0)
+                            .color(ui.visuals().text_color()),
+                    );
+                    ui.label(RichText::new(r.event.clone()).size(12.0));
+                    ui.label(
+                        RichText::new(r.mode.clone())
                             .size(12.0)
                             .color(ui.visuals().text_color()),
                     );
                     ui.label(
-                        RichText::new(backup::describe_reason(&s.label)).size(12.0),
+                        RichText::new(if r.settings > 0 {
+                            format!("{}", r.settings)
+                        } else {
+                            "—".into()
+                        })
+                        .size(12.0)
+                        .color(ui.visuals().text_color()),
                     );
                     ui.label(
                         RichText::new(
-                            backup::snapshot_mode(&s.label)
-                                .map(|m| m.label().to_string())
-                                .unwrap_or_else(|| "—".into()),
+                            r.delta_prev.map(|d| format!("{d}")).unwrap_or("—".into()),
                         )
                         .size(12.0)
                         .color(ui.visuals().text_color()),
                     );
                     ui.label(
-                        RichText::new(match s.kind {
-                            backup::SnapshotKind::Automatic => "auto",
-                            backup::SnapshotKind::Manual => "manual",
-                        })
-                        .size(11.0)
-                        .color(ui.visuals().weak_text_color()),
+                        RichText::new(r.kind)
+                            .size(11.0)
+                            .color(ui.visuals().weak_text_color()),
                     );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Restore").clicked() {
+                            self.submit(Job::Restore {
+                                source: RestoreSource::Snapshot(r.id.clone()),
+                            });
+                        }
+                    });
                     ui.end_row();
                 }
             });

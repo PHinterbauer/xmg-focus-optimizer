@@ -305,6 +305,27 @@ fn unknown_reasons_fall_back_plainly() {
 }
 
 #[test]
+fn count_changed_compares_by_setting_guid() {
+    let row = |setting: &str, ac: u32, dc: u32| backup::RestoreRow {
+        subgroup: "54533251-82be-4824-96c1-47b60b740d00".into(),
+        setting: setting.into(),
+        ac,
+        dc,
+    };
+    let a = "bc5038f7-23e0-4960-96da-33abaf5935ec";
+    let b = "893dee8e-2bef-41e0-89c6-b55d0929964c";
+    let old = vec![row(a, 70, 70), row(b, 5, 5)];
+    // Identical: nothing changed, including itself.
+    assert_eq!(backup::count_changed(&old, &old), 0);
+    // One value moved.
+    let new = vec![row(a, 60, 60), row(b, 5, 5)];
+    assert_eq!(backup::count_changed(&old, &new), 1);
+    // A setting only in the new snapshot counts as changed, not as an error.
+    let extended = vec![row(a, 60, 60), row(b, 5, 5), row("36687f9e-e3a5-4dbf-b1dc-15eb381c6863", 50, 50)];
+    assert_eq!(backup::count_changed(&old, &extended), 2);
+}
+
+#[test]
 fn snapshot_mode_only_names_apply_reasons() {
     use crate::profile::Mode;
     assert_eq!(backup::snapshot_mode("before-quiet"), Some(Mode::Quiet));

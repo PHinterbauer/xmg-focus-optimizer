@@ -444,6 +444,17 @@ fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// Counts settings whose values differ between two parsed snapshots,
+/// keyed by setting GUID. Pure so it stays unit-testable.
+pub fn count_changed(old: &[RestoreRow], new: &[RestoreRow]) -> usize {
+    use std::collections::HashMap;
+    let prev: HashMap<&str, (u32, u32)> =
+        old.iter().map(|r| (r.setting.as_str(), (r.ac, r.dc))).collect();
+    new.iter()
+        .filter(|r| prev.get(r.setting.as_str()) != Some(&(r.ac, r.dc)))
+        .count()
+}
+
 /// One parsed `subgroup|setting|ac|dc` row.
 #[derive(Debug, Clone)]
 pub struct RestoreRow {

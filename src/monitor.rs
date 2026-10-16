@@ -16,6 +16,10 @@ use crate::sysutil;
 #[derive(Debug, Clone)]
 pub enum MonitorEvent {
     PowerChanged { on_ac: bool, mode: Mode, triggered: bool },
+    /// The charger moved but no apply ran: the background task is missing and
+    /// this path must never prompt. The UI turns this into a visible warning
+    /// instead of the success note a `triggered` event would produce.
+    AutoSwitchSkipped { on_ac: bool, mode: Mode },
     Error(String),
 }
 
@@ -57,23 +61,32 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
                 // Silent by design: this runs on a background thread with no
                 // window to explain a UAC prompt, so a prompt here would just
                 // appear out of nowhere on every plug and unplug.
-                if !elevate::submit_silent(Job::Apply {
+                //
+                // The event reports whether anything actually ran. Claiming a
+                // re-apply that never happened is exactly how a stale scheme
+                // ends up praised as "up to date".
+                let ran = elevate::submit_silent(Job::Apply {
                     mode: live.mode,
                     control_fans: live.control_fans,
                     control_gpu: live.control_gpu_limit,
                     control_display: live.control_display,
-                }) {
+                });
+                if ran {
+                    let _ = tx.send(MonitorEvent::PowerChanged {
+                        on_ac,
+                        mode: live.mode,
+                        triggered: true,
+                    });
+                } else {
                     log_warn!(
                         "auto-switch skipped: background task not registered; \
                          use Finish setup so charger changes apply silently"
                     );
+                    let _ = tx.send(MonitorEvent::AutoSwitchSkipped {
+                        on_ac,
+                        mode: live.mode,
+                    });
                 }
-
-                let _ = tx.send(MonitorEvent::PowerChanged {
-                    on_ac,
-                    mode: live.mode,
-                    triggered: true,
-                });
             }
         })
         .ok();

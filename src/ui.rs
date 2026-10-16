@@ -396,30 +396,57 @@ impl App {
             }
         }
 
-        while let Ok(MonitorEvent::PowerChanged { on_ac, mode, triggered }) =
-            self.monitor_rx.try_recv()
-        {
-            self.on_ac = on_ac;
-            if triggered {
-                // Say what the switch actually did, not just that it happened:
-                // the headline numbers of the profile now in force.
-                let p = profile::Params::for_mode(mode, on_ac);
-                self.note(
-                    format!(
-                        "power source changed to {} - re-applied {mode} \
-                         (CPU {}%, GPU {} W, {}, brightness {}%, fans {})",
-                        if on_ac { "mains" } else { "battery" },
-                        p.cpu_max,
-                        p.gpu_watts,
-                        crate::display::label_for_mode(mode),
-                        p.brightness,
-                        p.fan_mode.label()
-                    ),
-                    NoteKind::Ok,
-                );
-                self.drift_acknowledged = false;
+        while let Ok(ev) = self.monitor_rx.try_recv() {
+            match ev {
+                MonitorEvent::PowerChanged { on_ac, mode, triggered } => {
+                    self.on_ac = on_ac;
+                    // The task may have appeared or vanished while running;
+                    // re-read it at the exact moment it matters.
+                    self.elevated_ready = elevate::task_exists();
+                    if triggered {
+                        // Say what the switch actually did, not just that it happened:
+                        // the headline numbers of the profile now in force.
+                        let p = profile::Params::for_mode(mode, on_ac);
+                        self.note(
+                            format!(
+                                "power source changed to {} - re-applied {mode} \
+                                 (CPU {}%, GPU {} W, {}, brightness {}%, fans {})",
+                                if on_ac { "mains" } else { "battery" },
+                                p.cpu_max,
+                                p.gpu_watts,
+                                crate::display::label_for_mode(mode),
+                                p.brightness,
+                                p.fan_mode.label()
+                            ),
+                            NoteKind::Ok,
+                        );
+                        self.drift_acknowledged = false;
+                    }
+                    self.recheck_drift();
+                }
+                MonitorEvent::AutoSwitchSkipped { on_ac, mode: _ } => {
+                    self.on_ac = on_ac;
+                    self.elevated_ready = elevate::task_exists();
+                    // Loud on purpose: without this, the scheme silently keeps
+                    // the other source's values while everything else claims
+                    // the switch happened.
+                    self.note(
+                        format!(
+                            "charger changed to {} - settings NOT re-applied: \
+                             background task missing. Click Finish setup (or run \
+                             once as administrator).",
+                            if on_ac { "mains" } else { "battery" }
+                        ),
+                        NoteKind::Warn,
+                    );
+                    self.drift_acknowledged = false;
+                    self.recheck_drift();
+                }
+                MonitorEvent::Error(e) => {
+                    log_warn!("power watcher error: {e}");
+                    self.note(format!("power watcher: {e}"), NoteKind::Warn);
+                }
             }
-            self.recheck_drift();
         }
 
         if self.busy {
@@ -1318,16 +1345,16 @@ impl App {
                 }
 
                 ui.add_space(6.0);
+                // Always clickable, even when everything matches: the table is
+                // the only place that shows every value, and hiding it exactly
+                // when the machine is healthy keeps the healthy state
+                // unverifiable.
                 if ui
-                    .add_enabled(
-                        drifted > 0,
-                        egui::Button::new(if self.drift_expanded {
-                            "Hide details"
-                        } else {
-                            "Show all settings"
-                        })
-                        .small(),
-                    )
+                    .small_button(if self.drift_expanded {
+                        "Hide details"
+                    } else {
+                        "Show all settings"
+                    })
                     .clicked()
                 {
                     self.drift_expanded = !self.drift_expanded;
@@ -1742,10 +1769,19 @@ impl App {
         ui.add_space(6.0);
 
         egui::Grid::new("history-rows")
-            .num_columns(3)
+            .num_columns(4)
             .spacing([14.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
+                for head in ["TIME", "EVENT", "MODE", "KIND"] {
+                    ui.label(
+                        RichText::new(head)
+                            .size(10.5)
+                            .strong()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                }
+                ui.end_row();
                 for s in &self.snapshots {
                     ui.label(
                         RichText::new(s.created.clone())
@@ -1754,6 +1790,15 @@ impl App {
                     );
                     ui.label(
                         RichText::new(backup::describe_reason(&s.label)).size(12.0),
+                    );
+                    ui.label(
+                        RichText::new(
+                            backup::snapshot_mode(&s.label)
+                                .map(|m| m.label().to_string())
+                                .unwrap_or_else(|| "—".into()),
+                        )
+                        .size(12.0)
+                        .color(ui.visuals().text_color()),
                     );
                     ui.label(
                         RichText::new(match s.kind {

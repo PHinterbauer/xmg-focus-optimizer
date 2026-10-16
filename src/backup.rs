@@ -113,6 +113,17 @@ pub fn describe_reason(reason: &str) -> String {
     }
 }
 
+/// Which mode a snapshot was taken for, if the reason names one. Only the
+/// apply paths record a mode; restores and manual snapshots return `None`
+/// instead of guessing.
+pub fn snapshot_mode(reason: &str) -> Option<crate::profile::Mode> {
+    match reason {
+        "before-quiet" => Some(crate::profile::Mode::Quiet),
+        "before-performance" => Some(crate::profile::Mode::Performance),
+        _ => None,
+    }
+}
+
 /// Removes only *automatic* snapshots beyond the limit. Never touches manual
 /// snapshots and never touches anything outside the snapshots folder.
 fn trim_snapshots(dir: &Path, _kind: SnapshotKind) {

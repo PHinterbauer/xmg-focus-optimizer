@@ -304,6 +304,20 @@ fn unknown_reasons_fall_back_plainly() {
     assert!(!s.contains('_'), "got {s:?}");
 }
 
+#[test]
+fn snapshot_mode_only_names_apply_reasons() {
+    use crate::profile::Mode;
+    assert_eq!(backup::snapshot_mode("before-quiet"), Some(Mode::Quiet));
+    assert_eq!(
+        backup::snapshot_mode("before-performance"),
+        Some(Mode::Performance)
+    );
+    // Restores and manual snapshots record no mode - None, not a guess.
+    for r in ["before-restore", "before-restore-to-initial", "manual", "cli", ""] {
+        assert_eq!(backup::snapshot_mode(r), None, "reason {r:?}");
+    }
+}
+
 // ------------------------------------------------------------- guid parsing --
 
 #[test]

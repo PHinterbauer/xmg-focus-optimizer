@@ -25,3 +25,6 @@ desktop.ini
 assets/icon-preview.png
 # Local working notes, not part of the project
 SESSION-STATE.md
+
+# Session handover notes, local only like SESSION-STATE.md
+HANDOVER.md

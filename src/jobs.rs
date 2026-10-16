@@ -19,6 +19,7 @@ pub enum Job {
         mode: Mode,
         control_fans: bool,
         control_gpu: bool,
+        control_display: bool,
     },
     /// Restore settings from a backup source.
     Restore { source: RestoreSource },

@@ -201,6 +201,7 @@ impl App {
                 mode: app.settings.mode,
                 control_fans: app.settings.control_fans,
                 control_gpu: app.settings.control_gpu_limit,
+                control_display: app.settings.control_display,
             });
         }
         app
@@ -324,6 +325,7 @@ impl App {
             mode: s.mode,
             control_fans: s.control_fans,
             control_gpu: s.control_gpu_limit,
+            control_display: s.control_display,
         });
     }
 
@@ -401,10 +403,12 @@ impl App {
                 self.note(
                     format!(
                         "power source changed to {} - re-applied {mode} \
-                         (CPU {}%, GPU {} W, fans {})",
+                         (CPU {}%, GPU {} W, {}, brightness {}%, fans {})",
                         if on_ac { "mains" } else { "battery" },
                         p.cpu_max,
                         p.gpu_watts,
+                        crate::display::label_for_mode(mode),
+                        p.brightness,
                         p.fan_mode.label()
                     ),
                     NoteKind::Ok,
@@ -1092,6 +1096,10 @@ impl App {
                             .size(11.5)
                             .color(ui.visuals().weak_text_color()),
                     );
+                    // The refresh rate does not vary by power source (Quiet is
+                    // fixed, Performance is the panel maximum), so it is
+                    // resolved once per card, not per row.
+                    let hz = crate::display::label_for_mode(*mode);
                     for (src_label, src_ac) in [("On mains", true), ("On battery", false)] {
                         let sp = profile::Params::for_mode(*mode, src_ac);
                         let live = src_ac == on_ac;
@@ -1107,9 +1115,10 @@ impl App {
                             );
                             ui.label(
                                 RichText::new(format!(
-                                    "{src_label}: CPU {}% · GPU {} W · fans {}",
+                                    "{src_label}: CPU {}% · GPU {} W · {hz} · brightness {}% · fans {}",
                                     sp.cpu_max,
                                     sp.gpu_watts,
+                                    sp.brightness,
                                     sp.fan_mode.label()
                                 ))
                                 .size(12.0)
@@ -1829,6 +1838,10 @@ impl App {
             ui.checkbox(
                 &mut self.settings.control_gpu_limit,
                 "Control the NVIDIA power limit",
+            );
+            ui.checkbox(
+                &mut self.settings.control_display,
+                "Control refresh rate (60 Hz / max) and brightness (70% / 100%)",
             );
         });
 

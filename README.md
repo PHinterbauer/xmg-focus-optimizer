@@ -9,7 +9,7 @@
 <br>
 
 [![Build](https://github.com/PHinterbauer/xmg-focus-optimizer/actions/workflows/build.yml/badge.svg)](https://github.com/PHinterbauer/xmg-focus-optimizer/actions/workflows/build.yml)
-[![Tests](https://img.shields.io/badge/tests-26%20passing-22a06b)](src/tests.rs)
+[![Tests](https://img.shields.io/badge/tests-51%20passing-22a06b)](src/tests.rs)
 [![Release](https://img.shields.io/github/v/release/PHinterbauer/xmg-focus-optimizer?label=release)](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-5b8def)](LICENSE)
 
@@ -23,8 +23,8 @@
 
 | Mode | Behaviour |
 |:--|:--|
-| **Quiet** | CPU capped at 70%, Windows biased toward the integrated GPU, RTX throttled to 25 W, fans kept quiet |
-| **Performance** | Full boost, every power saving dropped, GPU at its 85 W maximum, fans on turbo |
+| **Quiet** | CPU capped at 70%, Windows biased toward the integrated GPU, RTX throttled to 25 W, fans kept quiet, display at 60 Hz and 70% brightness |
+| **Performance** | Full boost, every power saving dropped, GPU at its 85 W maximum, fans on turbo, display at max refresh rate and 100% brightness |
 | **Automatic** | Unplug the charger and the battery values are applied. Plug it back in and mains returns. |
 | **Persistent** | Registers *itself* to come back at sign-in and quietly restores whichever mode you had selected. |
 
@@ -99,7 +99,7 @@ XMG-Backup/
 
 ## Consistency check
 
-The Dashboard compares **all 16 settings** against what the selected mode should produce for the
+The Dashboard compares **all 17 settings** against what the selected mode should produce for the
 current power source. When something disagrees, the app changes nothing until you choose:
 
 - **Change to Quiet / Performance** &mdash; rewrite the settings to match the mode
@@ -171,7 +171,7 @@ executable as an artefact.
 
 - Quiet is strictly more conservative than Performance, on every axis
 - Battery is never more aggressive than mains
-- All 16 GUIDs are well formed and unique; the two fixed pairs keep their AC/DC split
+- All 17 GUIDs are well formed and unique; the two fixed pairs keep their AC/DC split
 - Backup parsing rejects traversal, non-numeric and malformed-GUID input
 - Restore sources refuse `../` style path escapes
 - The AC/DC tolerance that stops false drift warnings

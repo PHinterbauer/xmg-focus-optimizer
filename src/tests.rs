@@ -71,10 +71,18 @@ fn performance_uses_the_hardware_maximum() {
 // ------------------------------------------------------------------- plan --
 
 #[test]
-fn plan_covers_all_sixteen_settings() {
+fn plan_covers_all_seventeen_settings() {
     let (_, entries) = profile::plan(Mode::Quiet, true);
-    assert_eq!(entries.len(), 16, "all settings must be present");
-    assert_eq!(profile::DEFS.len(), 16);
+    assert_eq!(entries.len(), 17, "all settings must be present");
+    assert_eq!(profile::DEFS.len(), 17);
+    // The display brightness entry must be there with the exact GUIDs from
+    // the original machine backup.
+    let b = entries
+        .iter()
+        .find(|e| e.alias == "DISPLAYBRIGHT")
+        .expect("brightness must be planned");
+    assert_eq!(b.subgroup, "7516b95f-f776-4464-8c53-06167f40cc99");
+    assert_eq!(b.setting, "aded5e82-b909-4619-9949-f5d71dac0bcb");
 }
 
 #[test]
@@ -109,6 +117,24 @@ fn the_two_fixed_pairs_keep_their_ac_dc_split() {
             ),
         }
     }
+}
+
+#[test]
+fn brightness_follows_the_mode() {
+    let q = profile::Params::for_mode(Mode::Quiet, true);
+    assert_eq!((q.brightness, q.brightness), (70, 70));
+    let p = profile::Params::for_mode(Mode::Performance, true);
+    assert_eq!((p.brightness, p.brightness), (100, 100));
+    // Quiet keeps the same brightness on battery by request: dimmer would be
+    // a guess, and the user asked for 70 flat.
+    let qb = profile::Params::for_mode(Mode::Quiet, false);
+    assert_eq!(qb.brightness, 70);
+}
+
+#[test]
+fn quiet_targets_sixty_hertz() {
+    assert_eq!(crate::display::hz_for_mode(Mode::Quiet), Some(60));
+    assert_eq!(crate::display::label_for_mode(Mode::Quiet), "60 Hz");
 }
 
 #[test]
@@ -409,7 +435,7 @@ fn a_genuinely_different_value_is_drift() {
 fn drift_counts_every_setting_exactly_once() {
     // A report built from a synthetic value set must total the plan length.
     let (_, entries) = profile::plan(Mode::Performance, true);
-    assert_eq!(entries.len(), 16);
+    assert_eq!(entries.len(), 17);
 }
 
 #[test]

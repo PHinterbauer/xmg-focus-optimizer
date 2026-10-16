@@ -1,5 +1,5 @@
 # XMG Focus Optimizer - clean factory reference
-# 16 managed power settings as subgroup|setting|ac|dc
+# 17 managed power settings as subgroup|setting|ac|dc
 # values are stock Windows power numbers only, no machine-identifying data.
 
 54533251-82be-4824-96c1-47b60b740d00|06cadf0e-64ed-448a-8927-ce7bf90eb35d|60|90
@@ -14,6 +14,7 @@
 54533251-82be-4824-96c1-47b60b740d00|893dee8e-2bef-41e0-89c6-b55d0929964c|5|5
 54533251-82be-4824-96c1-47b60b740d00|94d3a615-a899-4ac5-ae2b-e4d8f634367f|1|0
 238c9fa8-0aad-41ed-83f4-97be242c8f20|9d7815a6-7ee4-497e-8888-515a05f02364|10800|10800
+7516b95f-f776-4464-8c53-06167f40cc99|aded5e82-b909-4619-9949-f5d71dac0bcb|76|76
 54533251-82be-4824-96c1-47b60b740d00|bc5038f7-23e0-4960-96da-33abaf5935ec|100|100
 238c9fa8-0aad-41ed-83f4-97be242c8f20|bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d|2|0
 54533251-82be-4824-96c1-47b60b740d00|be337238-0d82-4146-a960-4f3749d470c7|2|2

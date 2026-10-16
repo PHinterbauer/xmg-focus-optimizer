@@ -1,6 +1,6 @@
 # Clean factory reference
 
-`original-settings.txt` holds the **16 power settings this app manages**, as
+`original-settings.txt` holds the **17 power settings this app manages**, as
 `subgroup|setting|ac|dc`, captured from the original machine backup.
 
 ## What is in here, and what is deliberately not

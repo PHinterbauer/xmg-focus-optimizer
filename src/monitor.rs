@@ -61,6 +61,7 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
                     mode: live.mode,
                     control_fans: live.control_fans,
                     control_gpu: live.control_gpu_limit,
+                    control_display: live.control_display,
                 }) {
                     log_warn!(
                         "auto-switch skipped: background task not registered; \

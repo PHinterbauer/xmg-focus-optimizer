@@ -13,6 +13,7 @@
 
 mod backup;
 mod config;
+mod display;
 mod drift;
 mod elevate;
 mod errors;
@@ -149,6 +150,7 @@ fn run_cli_command(cmd: &str, args: &[String]) {
                 mode,
                 control_fans: settings.control_fans,
                 control_gpu: settings.control_gpu_limit,
+                control_display: settings.control_display,
             }
         }
         "restore" => {

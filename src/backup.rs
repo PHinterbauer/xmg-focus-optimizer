@@ -333,6 +333,7 @@ fn write_current_factory(base: &Path) -> AppResult<()> {
 
     crate::startup::capture_autostart(base)?;
     crate::gpu::capture_limit(base)?;
+    crate::display::capture(base)?;
     Ok(())
 }
 

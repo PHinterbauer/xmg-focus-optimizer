@@ -8,6 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::backup::{self, RestoreSource, SnapshotKind};
+use crate::display;
 use crate::errors::AppResult;
 use crate::fans;
 use crate::gpu;
@@ -28,7 +29,8 @@ pub fn run(job: Job) -> JobResult {
             mode,
             control_fans,
             control_gpu,
-        } => do_apply(mode, control_fans, control_gpu),
+            control_display,
+        } => do_apply(mode, control_fans, control_gpu, control_display),
         Job::Restore { source } => do_restore(&source),
     }
 }
@@ -90,7 +92,7 @@ fn create_factory(note: &str) -> JobResult {
 
 // ----------------------------------------------------------------- apply ---
 
-fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
+fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: bool) -> JobResult {
     let mut r = JobResult {
         ok: true,
         summary: String::new(),
@@ -128,7 +130,7 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
             report.total() - report.drifted(),
             report.total()
         ));
-        finish_apply(&mut r, mode, on_ac, params, control_fans, control_gpu);
+        finish_apply(&mut r, mode, on_ac, params, control_fans, control_gpu, control_display);
         return r;
     }
 
@@ -173,7 +175,7 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool) -> JobResult {
             .extend(mismatches.into_iter().take(4).map(|m| format!("mismatch: {m}")));
     }
 
-    finish_apply(&mut r, mode, on_ac, params, control_fans, control_gpu);
+    finish_apply(&mut r, mode, on_ac, params, control_fans, control_gpu, control_display);
     r
 }
 
@@ -189,6 +191,7 @@ fn finish_apply(
     params: profile::Params,
     control_fans: bool,
     control_gpu: bool,
+    control_display: bool,
 ) {
     // GPU power limit
     if control_gpu {
@@ -210,6 +213,20 @@ fn finish_apply(
             fans::FanOutcome::Applied(m) => r.details.push(format!("Fans: {m}")),
             fans::FanOutcome::Unavailable(m) => r.warnings.push(format!("Fans: {m}")),
             fans::FanOutcome::Failed(m) => r.warnings.push(format!("Fans: {m}")),
+        }
+    }
+
+    // Display refresh rate. Brightness is already handled above as a normal
+    // power setting; only the Hertz need raw Win32.
+    if control_display {
+        match display::apply_for_mode(mode) {
+            display::DisplayOutcome::Applied(hz) => {
+                r.details.push(format!("Refresh rate: {hz} Hz"))
+            }
+            display::DisplayOutcome::Unavailable(m) => {
+                r.warnings.push(format!("refresh rate untouched ({m})"))
+            }
+            display::DisplayOutcome::Failed(m) => r.warnings.push(format!("refresh rate: {m}")),
         }
     }
 
@@ -290,10 +307,10 @@ fn do_restore(source: &RestoreSource) -> JobResult {
             .push(format!("{} could not be restored: {}", rep.failed.len(), rep.failed.join(", ")));
     }
 
-    // Restore the GPU limit when an initial backup is used. Startup entries are
-    // deliberately absent: this app never modifies them, so there is nothing
-    // of ours to put back and rewriting them could only disturb the user's
-    // sign-in.
+    // Restore the GPU limit and the refresh rate when an initial backup is
+    // used. Startup entries are deliberately absent: this app never modifies
+    // them, so there is nothing of ours to put back and rewriting them could
+    // only disturb the user's sign-in.
     if matches!(source, RestoreSource::Factory) {
         if let Ok(base) = crate::paths::backup_dir() {
             if let Some(w) = gpu::stored_limit(&base) {
@@ -301,6 +318,13 @@ fn do_restore(source: &RestoreSource) -> JobResult {
                     r.details.push(format!("GPU power limit: {w} W"));
                 } else {
                     r.warnings.push("GPU power limit could not be restored".into());
+                }
+            }
+            if let Some(hz) = display::stored_hz(&base) {
+                if display::set_hz(hz) {
+                    r.details.push(format!("Refresh rate: {hz} Hz"));
+                } else {
+                    r.warnings.push("refresh rate could not be restored".into());
                 }
             }
         }

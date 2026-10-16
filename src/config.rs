@@ -53,7 +53,18 @@ pub struct Settings {
     /// Manage the NVIDIA power limit.
     pub control_gpu_limit: bool,
 
+    /// Manage display refresh rate and brightness with the mode.
+    #[serde(default = "default_true")]
+    pub control_display: bool,
+
     pub theme: Theme,
+}
+
+/// New opt-out features default to on, so upgrading keeps them working.
+/// (Struct-level `#[serde(default)]` would otherwise switch them off for
+/// existing config files, which still lack the key.)
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Settings {
@@ -68,6 +79,7 @@ impl Default for Settings {
             confirm_before_apply: false,
             control_fans: true,
             control_gpu_limit: true,
+            control_display: true,
             theme: Theme::System,
         }
     }

@@ -9,7 +9,7 @@
 <br>
 
 [![Build](https://github.com/PHinterbauer/xmg-focus-optimizer/actions/workflows/build.yml/badge.svg)](https://github.com/PHinterbauer/xmg-focus-optimizer/actions/workflows/build.yml)
-[![Tests](https://img.shields.io/badge/tests-51%20passing-22a06b)](src/tests.rs)
+[![Tests](https://img.shields.io/badge/tests-67%20passing-22a06b)](src/tests.rs)
 [![Release](https://img.shields.io/github/v/release/PHinterbauer/xmg-focus-optimizer?label=release)](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-5b8def)](LICENSE)
 
@@ -119,6 +119,27 @@ untouched. The GPU limit and fans are still ensured, because those are not store
 
 ---
 
+## History
+
+Every change is a snapshot, so the record is complete by construction. The **History** tab turns
+that record into something you can actually read:
+
+- **Filter** &mdash; all, automatic only, or manual only
+- **Search** &mdash; over time, event, mode and snapshot id
+- **Details** &mdash; opens one entry: what it was, which mode, how many settings it captured, its
+  file &mdash; and the full list of settings that moved, before &rarr; after
+- **A / B** &mdash; mark any two entries, not just neighbours, and see exactly how many settings
+  differ between them
+- **File** &mdash; shows the snapshot in Explorer
+- **Restore** &mdash; the one button here that changes anything
+
+> [!NOTE]
+> **History deletes nothing.** Filters, search and the comparison are all views over the snapshots
+> that already exist. Backups stay append-only, and the trim past 40 applies to automatic snapshots
+> only &mdash; a manual snapshot is never removed.
+
+---
+
 ## Install
 
 1. Download `XMG-Optimizer.exe` from the [latest release](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest).
@@ -167,7 +188,7 @@ executable as an artefact.
 <details>
 <summary><b>What the tests cover</b></summary>
 
-`src/tests.rs` &mdash; 26 tests over the parts that must never silently go wrong:
+`src/tests.rs` &mdash; the parts that must never silently go wrong:
 
 - Quiet is strictly more conservative than Performance, on every axis
 - Battery is never more aggressive than mains
@@ -175,6 +196,9 @@ executable as an artefact.
 - Backup parsing rejects traversal, non-numeric and malformed-GUID input
 - Restore sources refuse `../` style path escapes
 - The AC/DC tolerance that stops false drift warnings
+- The scheduled task passes the battery-start check that charger auto-switch depends on
+- History: filters are exact, a diff lists only what moved, a vanished setting reads as a dash
+- Temperature parsers reject Celsius reported where tenths of Kelvin are expected
 
 </details>
 
@@ -186,6 +210,25 @@ The RTX 3050 Ti idles in performance state P0 &mdash; roughly 16 W instead of 0.
 driver profile held in an undocumented binary, so it is **not** automated. Change it by hand in
 NVIDIA Control Panel &rarr; *Manage 3D settings* &rarr; *Power management mode* &rarr;
 **Prefer maximum performance**.
+
+### CPU temperature
+
+The header always shows a CPU and a GPU reading. A sensor with no data shows as `CPU &ndash;`,
+never as a missing pill &mdash; so you can tell "no reading" apart from "not being measured". The
+value is never invented.
+
+Windows exposes no CPU temperature API, so the app tries documented sources in order:
+LibreHardwareMonitor, OpenHardwareMonitor, the firmware `MSAcpi` thermal zone, then the thermal-zone
+performance counter. **If your firmware publishes none of them, the reading stays `&ndash;`.**
+
+> [!NOTE]
+> Running [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+> fills the reading in immediately &mdash; the app picks it up on its next poll, no restart.
+>
+> Reading the embedded controller directly is deliberately **not** done. Those interfaces
+> (`WinRing0`, `SetDCHU_Data`, `nvdrsdb0.bin`) are undocumented, and a wrong call can leave a
+> laptop unbootable. A dash in the header is the honest answer; an unbootable laptop is not an
+> acceptable price for it.
 
 ---
 

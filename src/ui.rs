@@ -2075,14 +2075,14 @@ impl App {
             // A snapshot that vanished (trimmed) must not leave a compare pair
             // or an open detail panel pointing at a file that no longer exists.
             let live: Vec<&String> = self.history_rows.iter().map(|r| &r.id).collect();
-            self.history_cmp.retain(|id| live.contains(&id));
+            self.history_cmp.retain(|id| live.iter().any(|live_id| live_id == id));
             if self.history_cmp.len() < 2 {
                 self.history_cmp_diff = None;
             }
             // Cloned, not borrowed: clearing the field while a borrow of it
             // is live is exactly what the borrow checker is there to stop.
             if let Some(open) = self.history_open.clone() {
-                if !live.contains(&open) {
+                if !live.iter().any(|id| *id == &open) {
                     self.history_open = None;
                 }
             }
@@ -2301,35 +2301,32 @@ impl App {
                             ("A", is_a, HistoryAction::MarkA),
                             ("B", is_b, HistoryAction::MarkB),
                         ] {
+                            // Bound to locals first. An `if` without braces
+                            // around its else arm is not accepted inside a
+                            // method-call argument.
+                            let mark_fill = if filled { tone } else { else_fill(dark) };
+                            let mark_edge = if filled {
+                                tone
+                            } else {
+                                ui.visuals().widgets.noninteractive.bg_stroke.color
+                            };
+                            let mark_text = if filled {
+                                contrast_text(tone)
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
+                            let mark_hint = if filled {
+                                format!("Clear comparison slot {label}.")
+                            } else {
+                                format!("Mark this entry as {label} for the comparison.")
+                            };
                             let b = egui::Button::new(
-                                RichText::new(label)
-                                    .size(11.0)
-                                    .strong()
-                                    .color(if filled {
-                                        contrast_text(tone)
-                                    } else {
-                                        ui.visuals().weak_text_color()
-                                    }),
+                                RichText::new(label).size(11.0).strong().color(mark_text),
                             )
                             .min_size(Vec2::new(22.0, 20.0))
-                            .fill(if filled { tone } else else_fill(dark))
-                            .stroke(Stroke::new(
-                                1.0,
-                                if filled {
-                                    tone
-                                } else {
-                                    ui.visuals().widgets.noninteractive.bg_stroke.color
-                                },
-                            ));
-                            if ui
-                                .add(b)
-                                .on_hover_text(if filled {
-                                    "Clear this comparison slot.".to_string()
-                                } else {
-                                    format!("Mark this entry as {label} for the comparison.")
-                                })
-                                .clicked()
-                            {
+                            .fill(mark_fill)
+                            .stroke(Stroke::new(1.0, mark_edge));
+                            if ui.add(b).on_hover_text(mark_hint).clicked() {
                                 self.history_act = Some((r.id.clone(), act));
                             }
                         }
@@ -2476,21 +2473,25 @@ impl App {
 
         panel_card(ui, accent(Mode::Quiet, dark), |ui| {
             ui.horizontal(|ui| {
+                // Both arms end in `;`, so each evaluates to `()`. A bare
+                // `ui.label(..)` without one returns `Response` and the two
+                // arms stop agreeing on a type.
                 match &a_row {
-                    Some(a) => ui.label(
-                        RichText::new(format!(
-                            "A  {}  \u{2022}  {}",
-                            a.created, a.event
-                        ))
-                        .size(12.0)
-                        .strong()
-                        .color(ui.visuals().text_color()),
-                    ),
-                    None => ui.label(
-                        RichText::new("A  \u{2014}")
-                            .size(12.0)
-                            .color(ui.visuals().weak_text_color()),
-                    ),
+                    Some(a) => {
+                        ui.label(
+                            RichText::new(format!("A  {}  \u{2022}  {}", a.created, a.event))
+                                .size(12.0)
+                                .strong()
+                                .color(ui.visuals().text_color()),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new("A  \u{2014}")
+                                .size(12.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
                 }
                 match &b_id {
                     Some(b) => {
@@ -2505,11 +2506,13 @@ impl App {
                                 .color(ui.visuals().text_color()),
                         );
                     }
-                    None => ui.label(
-                        RichText::new("B  \u{2014} pick a second entry with the B button")
-                            .size(12.0)
-                            .color(ui.visuals().weak_text_color()),
-                    ),
+                    None => {
+                        ui.label(
+                            RichText::new("B  \u{2014} pick a second entry with the B button")
+                                .size(12.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui.small_button("Clear marks").clicked() {
@@ -2525,17 +2528,22 @@ impl App {
         };
         ui.add_space(6.0);
         let count = diff.len();
+        let headline = if count == 0 {
+            "Both entries hold identical values.".to_string()
+        } else {
+            format!(
+                "{count} setting{} differ between A and B.",
+                if count == 1 { "" } else { "s" }
+            )
+        };
         ui.label(
-            RichText::new(match count {
-                0 => "Both entries hold identical values.".to_string(),
-                n => format!("{n} setting{} differ between A and B.", if n == 1 { "" } else { "s" }),
-            })
-            .size(12.0)
-            .color(if count == 0 {
-                ok_color()
-            } else {
-                ui.visuals().text_color()
-            }),
+            RichText::new(headline)
+                .size(12.0)
+                .color(if count == 0 {
+                    ok_color()
+                } else {
+                    ui.visuals().text_color()
+                }),
         );
         change_table(ui, "SETTING", "A", "B", &diff, "No differences.");
     }

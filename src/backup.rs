@@ -450,10 +450,14 @@ fn valid_id(id: &str) -> bool {
 /// detail view lists, so the delta number and the list never disagree.
 pub fn count_changed(old: &[RestoreRow], new: &[RestoreRow]) -> usize {
     use std::collections::{HashMap, HashSet};
-    let prev: HashMap<&str, (u32, u32)> =
-        old.iter().map(|r| (r.setting.as_str(), (r.ac, r.dc)));
-    let cur: HashMap<&str, (u32, u32)> =
-        new.iter().map(|r| (r.setting.as_str(), (r.ac, r.dc)));
+    let prev: HashMap<&str, (u32, u32)> = old
+        .iter()
+        .map(|r| (r.setting.as_str(), (r.ac, r.dc)))
+        .collect();
+    let cur: HashMap<&str, (u32, u32)> = new
+        .iter()
+        .map(|r| (r.setting.as_str(), (r.ac, r.dc)))
+        .collect();
     let mut keys: HashSet<&str> = prev.keys().map(|k| *k).collect();
     keys.extend(cur.keys().map(|k| *k));
     keys.into_iter()

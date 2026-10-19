@@ -2074,15 +2074,18 @@ impl App {
             self.history_ids = ids;
             // A snapshot that vanished (trimmed) must not leave a compare pair
             // or an open detail panel pointing at a file that no longer exists.
-            let live: Vec<&String> = self.history_rows.iter().map(|r| &r.id).collect();
-            self.history_cmp.retain(|id| live.iter().any(|live_id| live_id == id));
+            // A set of owned ids, so nothing here borrows `self` while the
+            // fields are being cleared.
+            let live: std::collections::HashSet<&str> =
+                self.history_rows.iter().map(|r| r.id.as_str()).collect();
+            self.history_cmp.retain(|id| live.contains(id.as_str()));
             if self.history_cmp.len() < 2 {
                 self.history_cmp_diff = None;
             }
             // Cloned, not borrowed: clearing the field while a borrow of it
             // is live is exactly what the borrow checker is there to stop.
             if let Some(open) = self.history_open.clone() {
-                if !live.iter().any(|id| *id == &open) {
+                if !live.contains(open.as_str()) {
                     self.history_open = None;
                 }
             }

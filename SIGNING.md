@@ -28,6 +28,40 @@ Control is the strict one; the older "Windows protected your PC" warning is not.
 
 Fine for yourself and a few people. Not fine for distribution.
 
+#### Telling the two apart
+
+They look like the same problem and they are not:
+
+| Symptom | Mechanism | Fix |
+|:--|:--|:--|
+| *"Windows protected your PC"*, with a **More info** → **Run anyway** | Mark of the Web on the downloaded file | `Unblock-File` |
+| Nothing happens. No dialog, no error | Smart App Control refusing an unsigned binary | folder exclusion |
+
+`Unblock-File` removes the Zone.Identifier stream. It does **not** satisfy Smart App Control,
+which judges the signature, not where the file came from.
+
+#### Why this can break without any change to the binary
+
+Smart App Control has three states: off, evaluation, on. **Evaluation logs but does not enforce.**
+A binary can therefore run happily for weeks and then stop running when the setting moves to
+enforcing — which happens without anyone touching it, or because the setting was changed.
+
+The failure looks like a regression in the app. It is not. Every build in this repository is
+unsigned, including the ones that used to run. To confirm which case you are in:
+
+```
+Event Viewer → Applications and Services Logs →
+  Microsoft → Windows → Code Integrity → Operational
+```
+
+Events **3033** and **3077** naming `XMG-Optimizer.exe` with *"did not meet the Enterprise signing
+level requirements"* are Smart App Control. They are logged in evaluation mode too, so their
+presence alone does not prove enforcement — but paired with a binary that will not start, they are
+the answer.
+
+Policy ID `{0283AC0F-FFF1-49AE-ADA1-8A933130CAD6}` in those events is Microsoft's own shipped
+policy, not anything configured on the machine.
+
 ### 2. Self-signed certificate, installed on each machine — free
 
 You can create a certificate, sign the binary with it, and install it into **Trusted

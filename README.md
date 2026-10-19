@@ -143,16 +143,37 @@ that record into something you can actually read:
 ## Install
 
 1. Download `XMG-Optimizer.exe` from the [latest release](https://github.com/PHinterbauer/xmg-focus-optimizer/releases/latest).
-2. Right-click &rarr; **Run as administrator**. This one elevated run registers a background task.
-3. Accept the prompt. From then on, applying a mode needs **no** further prompts.
+2. Remove the download mark, otherwise Windows refuses to run it:
+   ```powershell
+   Unblock-File -LiteralPath "$env:USERPROFILE\Downloads\XMG-Optimizer.exe"
+   ```
+3. Right-click &rarr; **Run as administrator**. This one elevated run registers a background task.
+4. Accept the prompt. From then on, applying a mode needs **no** further prompts.
 
 > [!TIP]
 > Closing the window collapses it into the notification area, so the background watcher keeps
 > reacting when you unplug. Quit from the tray menu or the Settings tab.
 
-> [!NOTE]
-> If Smart App Control refuses a freshly built unsigned binary, add the folder under
-> Windows Security &rarr; App & browser control &rarr; **Exclusions**.
+### If Windows still refuses to run it
+
+The binary is **unsigned**, so two different Windows checks can stop it. They need different fixes:
+
+| What you see | Cause | Fix |
+|:--|:--|:--|
+| *"Windows protected your PC"* &rarr; **More info** &rarr; **Run anyway** | the file is marked as downloaded | `Unblock-File`, as above |
+| Nothing happens at all, no dialog | **Smart App Control** blocks unsigned binaries outright | add the folder as an exclusion |
+
+For the second case: **Windows Security &rarr; App & browser control &rarr; Exclusions &rarr; Add an
+exclusion &rarr; Folder**, and pick the folder holding the `.exe`.
+
+> [!IMPORTANT]
+> **If the app ran before and does not now, this is almost certainly it.** Smart App Control starts
+> in a non-enforcing *evaluation* mode and can later switch to enforcing on its own, or the setting
+> gets flipped. Nothing about the binary changed &mdash; every build here is unsigned, including
+> the releases that used to run. The block is recorded as Code Integrity event **3033/3077**
+> (*"did not meet the Enterprise signing level requirements"*) in
+> `Microsoft-Windows-CodeIntegrity/Operational`. See [SIGNING.md](SIGNING.md) for the options that
+> remove the need for the exclusion entirely.
 
 <details>
 <summary><b>Command line reference</b></summary>

@@ -2562,67 +2562,6 @@ impl App {
         );
         self.history_cmp_diff = Some(diff_details(&a, &b, &setting_labels()));
     }
-}
-
-/// The neutral fill for an unmarked A/B button: quiet enough to read as
-/// secondary next to the filled, accent-coloured marked state.
-fn else_fill(dark: bool) -> egui::Color32 {
-    if dark {
-        egui::Color32::from_gray(48)
-    } else {
-        egui::Color32::from_gray(238)
-    }
-}
-
-/// A three-column table of before→after pairs, used by both the expanded row
-/// and the detail/compare panels so the two never render differently.
-fn change_table(
-    ui: &mut egui::Ui,
-    head_a: &str,
-    head_b: &str,
-    head_c: &str,
-    changes: &[(String, String, String)],
-    empty_text: &str,
-) {
-    if changes.is_empty() {
-        ui.label(
-            RichText::new(empty_text)
-                .size(11.5)
-                .color(ui.visuals().weak_text_color()),
-        );
-        return;
-    }
-    egui::Grid::new("change-table")
-        .num_columns(3)
-        .spacing([18.0, 3.0])
-        .show(ui, |ui| {
-            for head in [head_a, head_b, head_c] {
-                ui.label(
-                    RichText::new(head)
-                        .size(10.5)
-                        .strong()
-                        .color(ui.visuals().weak_text_color()),
-                );
-            }
-            ui.end_row();
-            for (label, before, after) in changes {
-                ui.label(RichText::new(label.clone()).size(11.5));
-                ui.label(
-                    RichText::new(before.clone())
-                        .size(11.5)
-                        .monospace()
-                        .color(ui.visuals().weak_text_color()),
-                );
-                ui.label(
-                    RichText::new(after.clone())
-                        .size(11.5)
-                        .monospace()
-                        .color(ui.visuals().text_color()),
-                );
-                ui.end_row();
-            }
-        });
-}
 
     // ------------------------------------------------------------- settings --
 
@@ -2793,4 +2732,64 @@ fn change_table(
             );
         });
     }
+}
+
+/// The neutral fill for an unmarked A/B button: quiet enough to read as
+/// secondary next to the filled, accent-coloured marked state.
+fn else_fill(dark: bool) -> egui::Color32 {
+    if dark {
+        egui::Color32::from_gray(48)
+    } else {
+        egui::Color32::from_gray(238)
+    }
+}
+
+/// A three-column table of before→after pairs, used by the entry detail and
+/// the A/B comparison so the two never render differently.
+fn change_table(
+    ui: &mut egui::Ui,
+    head_a: &str,
+    head_b: &str,
+    head_c: &str,
+    changes: &[(String, String, String)],
+    empty_text: &str,
+) {
+    if changes.is_empty() {
+        ui.label(
+            RichText::new(empty_text)
+                .size(11.5)
+                .color(ui.visuals().weak_text_color()),
+        );
+        return;
+    }
+    egui::Grid::new("change-table")
+        .num_columns(3)
+        .spacing([18.0, 3.0])
+        .show(ui, |ui| {
+            for head in [head_a, head_b, head_c] {
+                ui.label(
+                    RichText::new(head)
+                        .size(10.5)
+                        .strong()
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+            ui.end_row();
+            for (label, before, after) in changes {
+                ui.label(RichText::new(label.clone()).size(11.5));
+                ui.label(
+                    RichText::new(before.clone())
+                        .size(11.5)
+                        .monospace()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.label(
+                    RichText::new(after.clone())
+                        .size(11.5)
+                        .monospace()
+                        .color(ui.visuals().text_color()),
+                );
+                ui.end_row();
+            }
+        });
 }

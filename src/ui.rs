@@ -52,10 +52,54 @@ impl Tab {
         match self {
             Tab::Dashboard => "Pick a profile, or let the charger decide.",
             Tab::Backups => "Every change is snapshotted before it happens.",
-            Tab::History => "What changed and when, newest first.",
+            Tab::History => "What changed and when — inspect, compare, restore.",
             Tab::Settings => "How the app behaves, and how it looks.",
         }
     }
+}
+
+/// Which snapshots the History tab lists. Pure view filter; the Backups tab
+/// always shows everything.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum HistoryFilter {
+    #[default]
+    All,
+    Auto,
+    Manual,
+}
+
+impl HistoryFilter {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            HistoryFilter::All => "All",
+            HistoryFilter::Auto => "Automatic",
+            HistoryFilter::Manual => "Manual",
+        }
+    }
+
+    /// Does a rendered row pass this filter?
+    pub(crate) fn matches(self, kind: &str) -> bool {
+        match self {
+            HistoryFilter::All => true,
+            HistoryFilter::Auto => kind == "auto",
+            HistoryFilter::Manual => kind == "manual",
+        }
+    }
+}
+
+/// A button the user pressed in the History grid. Resolved after the grid
+/// closes, against the id the row was drawn with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HistoryAction {
+    /// Open/close the detail panel for this row.
+    Details,
+    /// Mark this row as comparison slot A, or clear it if it already is A.
+    MarkA,
+    /// Mark this row as comparison slot B, or clear it if it already is B.
+    MarkB,
+    Restore,
+    /// Reveal the snapshot file in Explorer.
+    Reveal,
 }
 
 struct Note {
@@ -81,11 +125,30 @@ struct HistoryRow {
     event: String,
     mode: String,
     kind: &'static str,
+    /// Absolute snapshot file path, for the "File" button (`worker::reveal`).
+    path: String,
     /// Power rows parsed from the snapshot file (0 when unreadable).
     settings: usize,
     /// Settings whose values differ from the next-older snapshot. `None` for
     /// the oldest entry (nothing to compare against) and for unreadable files.
     delta_prev: Option<usize>,
+    /// What actually changed vs the previous snapshot: (label, old, new).
+    /// Shown in the detail view; empty means identical - or unreadable.
+    changes: Vec<(String, String, String)>,
+}
+
+/// Setting GUID → human label. One place so the History detail view, the
+/// compare panel and the row builder never disagree on names.
+///
+/// Both key and value are `&'static str` on purpose: `HashMap` is invariant
+/// in its parameters, so a `HashMap<&'static str, &'static str>` would *not*
+/// coerce to the `HashMap<&str, &str>` a function taking borrowed keys would
+/// otherwise ask for.
+pub(crate) fn setting_labels() -> std::collections::HashMap<&'static str, &'static str> {
+    crate::profile::DEFS
+        .iter()
+        .map(|(_, label, _, setting)| (*setting, *label))
+        .collect()
 }
 
 /// Builds render rows from the snapshot list, newest first. Reads each file
@@ -105,21 +168,29 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
         .collect();
 
     let n = parsed.len();
+    // Labels in DEFS order, so the detail view reads like the consistency
+    // table instead of hash order.
+    let labels = setting_labels();
     parsed
         .into_iter()
         .enumerate()
         .map(|(i, (s, rows))| {
             // Newest first in the UI, so the "previous" snapshot is the next
             // one down the list.
-            let delta_prev = if i + 1 < n {
-                let older = std::fs::read_to_string(&snaps[i + 1].path)
+            let older: Vec<backup::RestoreRow> = if i + 1 < n {
+                std::fs::read_to_string(&snaps[i + 1].path)
                     .ok()
                     .map(|t| backup::parse_backup(&t))
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let delta_prev = if i + 1 < n {
                 Some(backup::count_changed(&older, &rows))
             } else {
                 None
             };
+            let changes = diff_details(&older, &rows, &labels);
             HistoryRow {
                 id: s.id.clone(),
                 created: s.created.clone(),
@@ -131,11 +202,55 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
                     backup::SnapshotKind::Automatic => "auto",
                     backup::SnapshotKind::Manual => "manual",
                 },
+                path: s.path.clone(),
                 settings: rows.len(),
                 delta_prev,
+                changes,
             }
         })
         .collect()
+}
+
+/// Per-setting old→new pairs between two snapshots, in DEFS order. Newly
+/// appeared settings read from "—", vanished ones read to "—".
+pub(crate) fn diff_details(
+    old: &[backup::RestoreRow],
+    new: &[backup::RestoreRow],
+    labels: &std::collections::HashMap<&'static str, &'static str>,
+) -> Vec<(String, String, String)> {
+    use std::collections::HashMap;
+    let prev: HashMap<&str, (u32, u32)> = old
+        .iter()
+        .map(|r| (r.setting.as_str(), (r.ac, r.dc)))
+        .collect();
+    let cur: HashMap<&str, (u32, u32)> = new
+        .iter()
+        .map(|r| (r.setting.as_str(), (r.ac, r.dc)))
+        .collect();
+    let mut keys: Vec<&str> = prev.keys().chain(cur.keys()).map(|k| *k).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    let mut out = Vec::new();
+    for k in keys {
+        let o = prev.get(k);
+        let n = cur.get(k);
+        if o != n {
+            let label = labels.get(k).copied().unwrap_or(k).to_string();
+            let fmt = |(ac, dc): (u32, u32)| {
+                if ac == dc {
+                    format!("{ac}")
+                } else {
+                    format!("{ac} / {dc}")
+                }
+            };
+            out.push((
+                label,
+                o.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
+                n.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
+            ));
+        }
+    }
+    out
 }
 
 pub struct App {
@@ -191,6 +306,25 @@ pub struct App {
     /// file parsing behind them runs only when the list itself changes.
     history_ids: Vec<String>,
     history_rows: Vec<HistoryRow>,
+    /// Row the user opened in the detail panel, by snapshot id. `None` closes
+    /// the panel.
+    history_open: Option<String>,
+    /// Free-text filter over the history list (matches time, event, mode and
+    /// the raw id). Pure view state, never persisted.
+    history_search: String,
+    /// Which rows the History tab lists. The Backups tab always shows all.
+    history_filter: HistoryFilter,
+    /// Snapshot ids picked for an arbitrary A/B comparison, in the order they
+    /// were marked: first is A, second is B. Two marks make a comparison;
+    /// a third mark replaces the older one so the flow never deadlocks.
+    history_cmp: Vec<String>,
+    /// The A↔B diff, computed once when the second mark lands. Cached so the
+    /// panel costs no file IO per frame.
+    history_cmp_diff: Option<Vec<(String, String, String)>>,
+    /// What a row's buttons asked for this frame, resolved after the grid
+    /// closes. Actions act on the id they were drawn with, so a snapshot
+    /// trimmed mid-paint cannot make a button hit the wrong row.
+    history_act: Option<(String, HistoryAction)>,
     /// Automatic one-time setup runs at most once per process, on a thread,
     /// and only for interactive launches. Without the once-guard a denied UAC
     /// prompt would reappear on every frame.
@@ -253,6 +387,12 @@ impl App {
             interactive: !autostarted && !start_hidden,
             history_ids: Vec::new(),
             history_rows: Vec::new(),
+            history_open: None,
+            history_search: String::new(),
+            history_filter: HistoryFilter::default(),
+            history_cmp: Vec::new(),
+            history_cmp_diff: None,
+            history_act: None,
         };
 
         if start_hidden {
@@ -813,20 +953,35 @@ impl eframe::App for App {
                         }
                         // Live temperatures, peeked without blocking: the
                         // poller thread owns the data and the UI only reads.
-                        // A pill is shown only while its sensor answers, so a
-                        // machine with no CPU sensor simply shows the GPU.
-                        // Once the GPU has answered, a missing CPU reading is
-                        // shown explicitly as "CPU –" instead of silently
-                        // vanishing: polling works, the sensor just has no data.
+                        // Both pills are always shown so the header layout never
+                        // jumps. A sensor with no data reads "–" with a tooltip
+                        // naming what was checked; no value is ever invented.
+                        // Direct EC reads stay forbidden (see README), so on
+                        // machines without a WMI sensor "CPU –" is the honest
+                        // answer - running LibreHardwareMonitor fills it in.
                         if let Ok(t) = self.temps.try_lock() {
-                            if let Some(g) = t.gpu {
-                                pill(ui, &format!("GPU {g:.0}°"), g < 80.0);
-                                if let Some(c) = t.cpu {
-                                    pill(ui, &format!("CPU {c:.0}°"), c < 85.0);
-                                } else {
-                                    pill_plain(ui, "CPU –");
+                            match t.gpu {
+                                Some(g) => pill(ui, &format!("GPU {g:.0}°"), g < 80.0),
+                                None => {
+                                    pill_plain(ui, "GPU –").on_hover_text(
+                                        "No GPU reading - nvidia-smi gave no value.",
+                                    );
                                 }
                             }
+                            match t.cpu {
+                                Some(c) => pill(ui, &format!("CPU {c:.0}°"), c < 85.0),
+                                None => {
+                                    pill_plain(ui, "CPU –").on_hover_text(
+                                        "No CPU sensor found - checked LibreHardwareMonitor, \
+                                         OpenHardwareMonitor and the firmware zones \
+                                         (MSAcpi plus the thermal-zone counter). Run \
+                                         LibreHardwareMonitor for live CPU temperatures.",
+                                    );
+                                }
+                            }
+                        } else {
+                            pill_plain(ui, "GPU –");
+                            pill_plain(ui, "CPU –");
                         }
                         if self.elevated_ready {
                             pill(ui, "Background task ready", true);
@@ -1121,7 +1276,8 @@ fn pill(ui: &mut egui::Ui, text: &str, good: bool) {
 
 /// Neutral chip for states that are neither good nor bad: unknown sensor
 /// readings and pending setup. Same shape as [`pill`], no semantic colour.
-fn pill_plain(ui: &mut egui::Ui, text: &str) {
+/// Returns the response so callers can hang a tooltip off it.
+fn pill_plain(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let c = ui.visuals().weak_text_color();
     egui::Frame::new()
         .fill(ui.visuals().widgets.noninteractive.bg_stroke.color.gamma_multiply(0.25))
@@ -1129,7 +1285,8 @@ fn pill_plain(ui: &mut egui::Ui, text: &str) {
         .inner_margin(Margin::symmetric(10, 4))
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(12.0).color(c));
-        });
+        })
+        .response
 }
 
 /// Amber chip for attention states. Same shape as [`pill`].
@@ -1874,15 +2031,22 @@ impl App {
 
     // -------------------------------------------------------------- history --
 
-    /// Read-only timeline of everything the app did, derived from the
-    /// snapshots: every apply and every restore snapshots first, so the list
-    /// is complete without any extra bookkeeping. Restoring stays on the
-    /// Backups tab; this page answers "what happened", not "undo it".
+    /// Timeline of everything the app did, derived from the snapshots: every
+    /// apply and every restore snapshots first, so the list is complete
+    /// without any extra bookkeeping.
+    ///
+    /// Deliberately more than the Backups tab, which is a plain list of
+    /// files with one Restore each. This page is for *reading* history:
+    /// filter it, search it, expand any entry to see exactly which settings
+    /// it captured, compare any two entries against each other, and jump to
+    /// the file on disk. Only one thing it offers is a change — Restore,
+    /// because undoing is the point of keeping snapshots.
     fn history(&mut self, ui: &mut egui::Ui) {
+        let dark = ui.visuals().dark_mode;
         ui.add_space(4.0);
 
         if self.snapshots.is_empty() {
-            panel_card(ui, accent(Mode::Quiet, ui.visuals().dark_mode), |ui| {
+            panel_card(ui, accent(Mode::Quiet, dark), |ui| {
                 ui.label(
                     RichText::new("No activity yet.")
                         .strong()
@@ -1901,16 +2065,6 @@ impl App {
             return;
         }
 
-        ui.label(
-            RichText::new(format!(
-                "{} events - automatic snapshots are trimmed past 40, manual ones never",
-                self.snapshots.len()
-            ))
-            .size(11.5)
-            .color(ui.visuals().weak_text_color()),
-        );
-        ui.add_space(6.0);
-
         // Rebuilt only when the snapshot list itself changes: parsing every
         // file on every frame would do real IO sixty times a second for
         // content that barely moves.
@@ -1918,22 +2072,154 @@ impl App {
         if ids != self.history_ids {
             self.history_rows = build_history_rows(&self.snapshots);
             self.history_ids = ids;
+            // A snapshot that vanished (trimmed) must not leave a compare pair
+            // or an open detail panel pointing at a file that no longer exists.
+            let live: Vec<&String> = self.history_rows.iter().map(|r| &r.id).collect();
+            self.history_cmp.retain(|id| live.contains(&id));
+            if self.history_cmp.len() < 2 {
+                self.history_cmp_diff = None;
+            }
+            // Cloned, not borrowed: clearing the field while a borrow of it
+            // is live is exactly what the borrow checker is there to stop.
+            if let Some(open) = self.history_open.clone() {
+                if !live.contains(&open) {
+                    self.history_open = None;
+                }
+            }
         }
+
+        self.history_toolbar(ui);
+
+        // Filtered view. Taken as an owned Vec so the grid closure never
+        // touches `self.history_rows` while it is being drawn.
+        let needle = self.history_search.trim().to_ascii_lowercase();
+        let filter = self.history_filter;
+        let visible: Vec<HistoryRow> = self
+            .history_rows
+            .iter()
+            .filter(|r| filter.matches(r.kind))
+            .filter(|r| {
+                needle.is_empty()
+                    || r.created.to_ascii_lowercase().contains(&needle)
+                    || r.event.to_ascii_lowercase().contains(&needle)
+                    || r.mode.to_ascii_lowercase().contains(&needle)
+                    || r.id.to_ascii_lowercase().contains(&needle)
+            })
+            .cloned()
+            .collect();
+
+        ui.label(
+            RichText::new(format!(
+                "{} of {} events - automatic snapshots are trimmed past 40, manual ones never",
+                visible.len(),
+                self.history_rows.len()
+            ))
+            .size(11.5)
+            .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(6.0);
+
+        if visible.is_empty() {
+            ui.label(
+                RichText::new("Nothing matches that filter.")
+                    .size(12.0)
+                    .color(ui.visuals().weak_text_color()),
+            );
+        } else {
+            self.history_table(ui, &visible);
+        }
+
+        // Actions are resolved after the grid, against the ids it drew.
+        if let Some((id, act)) = self.history_act.take() {
+            self.run_history_action(&id, act);
+        }
+
+        ui.add_space(10.0);
+        self.history_detail(ui);
+        self.history_compare(ui);
+    }
+
+    /// Filter chips, search field and the two page-level actions.
+    fn history_toolbar(&mut self, ui: &mut egui::Ui) {
+        let dark = ui.visuals().dark_mode;
+        let tone = accent(Mode::Quiet, dark);
+
+        egui::Frame::new()
+            .fill(card_bg(dark))
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(Margin::symmetric(12, 10))
+            .stroke(Stroke::new(1.0, tone.gamma_multiply(if dark { 0.45 } else { 0.3 })))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Show")
+                            .size(11.0)
+                            .strong()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    for f in [
+                        HistoryFilter::All,
+                        HistoryFilter::Auto,
+                        HistoryFilter::Manual,
+                    ] {
+                        if ui
+                            .selectable_label(self.history_filter == f, f.label())
+                            .clicked()
+                        {
+                            self.history_filter = f;
+                        }
+                    }
+                    ui.add_space(14.0);
+                    ui.label(
+                        RichText::new("Search")
+                            .size(11.0)
+                            .strong()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.history_search)
+                            .hint_text("time, event, mode, id")
+                            .desired_width(190.0),
+                    );
+                    if !self.history_search.is_empty() && ui.small_button("Clear").clicked() {
+                        self.history_search.clear();
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                !self.busy,
+                                egui::Button::new("Take a snapshot now"),
+                            )
+                            .clicked()
+                        {
+                            self.submit(Job::Snapshot {
+                                reason: "manual".into(),
+                                manual: true,
+                            });
+                        }
+                        if ui.button("Open backup folder").clicked() {
+                            worker::open_backup_folder();
+                        }
+                    });
+                });
+            });
+    }
+
+    /// The event grid. Buttons only *record* what was pressed
+    /// (`self.history_act`); the action runs after the grid, so no closure
+    /// ever borrows `self` mutably while it is being drawn.
+    fn history_table(&mut self, ui: &mut egui::Ui, rows: &[HistoryRow]) {
+        let dark = ui.visuals().dark_mode;
+        let tone = accent(Mode::Quiet, dark);
+        let open = self.history_open.clone();
+        let cmp = self.history_cmp.clone();
 
         egui::Grid::new("history-rows")
             .num_columns(7)
             .spacing([14.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
-                for head in [
-                    "TIME",
-                    "EVENT",
-                    "MODE",
-                    "VALUES",
-                    "CHANGED",
-                    "KIND",
-                    "",
-                ] {
+                for head in ["TIME", "EVENT", "MODE", "VALUES", "CHANGED", "KIND", ""] {
                     ui.label(
                         RichText::new(head)
                             .size(10.5)
@@ -1942,16 +2228,18 @@ impl App {
                     );
                 }
                 ui.end_row();
-                // Owned rows: the Restore button calls self.submit(..) inside
-                // the grid closure, which would borrow self twice off the live
-                // list. Same pattern as the Backups rows.
-                let rows = self.history_rows.clone();
-                for r in &rows {
+
+                for r in rows {
+                    let is_open = open.as_deref() == Some(r.id.as_str());
+                    let is_a = cmp.first().map(|a| a == &r.id).unwrap_or(false);
+                    let is_b = cmp.get(1).map(|b| b == &r.id).unwrap_or(false);
+
                     ui.label(
                         RichText::new(r.created.clone())
                             .size(12.0)
                             .color(ui.visuals().text_color()),
-                    );
+                    )
+                    .on_hover_text(r.id.clone());
                     ui.label(RichText::new(r.event.clone()).size(12.0));
                     ui.label(
                         RichText::new(r.mode.clone())
@@ -1979,17 +2267,362 @@ impl App {
                             .size(11.0)
                             .color(ui.visuals().weak_text_color()),
                     );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.small_button("Restore").clicked() {
-                            self.submit(Job::Restore {
-                                source: RestoreSource::Snapshot(r.id.clone()),
-                            });
+
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("Restore"))
+                            .on_hover_text(
+                                "Write this snapshot back onto the active power scheme. \
+                                 The current state is snapshotted first, so this is \
+                                 itself undoable.",
+                            )
+                            .clicked()
+                        {
+                            self.history_act = Some((r.id.clone(), HistoryAction::Restore));
+                        }
+                        if ui
+                            .small_button("Details")
+                            .on_hover_text("Show every setting captured in this entry.")
+                            .clicked()
+                        {
+                            self.history_act = Some((r.id.clone(), HistoryAction::Details));
+                        }
+                        if ui
+                            .small_button("File")
+                            .on_hover_text("Show this snapshot in Explorer.")
+                            .clicked()
+                        {
+                            self.history_act = Some((r.id.clone(), HistoryAction::Reveal));
+                        }
+                        // A/B marks: filled while the row is the marked slot,
+                        // outlined otherwise. Two marks produce a comparison.
+                        for (label, filled, act) in [
+                            ("A", is_a, HistoryAction::MarkA),
+                            ("B", is_b, HistoryAction::MarkB),
+                        ] {
+                            let b = egui::Button::new(
+                                RichText::new(label)
+                                    .size(11.0)
+                                    .strong()
+                                    .color(if filled {
+                                        contrast_text(tone)
+                                    } else {
+                                        ui.visuals().weak_text_color()
+                                    }),
+                            )
+                            .min_size(Vec2::new(22.0, 20.0))
+                            .fill(if filled { tone } else else_fill(dark))
+                            .stroke(Stroke::new(
+                                1.0,
+                                if filled {
+                                    tone
+                                } else {
+                                    ui.visuals().widgets.noninteractive.bg_stroke.color
+                                },
+                            ));
+                            if ui
+                                .add(b)
+                                .on_hover_text(if filled {
+                                    "Clear this comparison slot.".to_string()
+                                } else {
+                                    format!("Mark this entry as {label} for the comparison.")
+                                })
+                                .clicked()
+                            {
+                                self.history_act = Some((r.id.clone(), act));
+                            }
+                        }
+                        // Marks the row whose detail panel is open below, so
+                        // the table and the panel always agree.
+                        if is_open {
+                            ui.label(RichText::new("▾").size(11.0).color(tone));
                         }
                     });
                     ui.end_row();
                 }
             });
     }
+
+    /// Runs whatever the grid recorded this frame.
+    fn run_history_action(&mut self, id: &str, act: HistoryAction) {
+        let Some(row) = self.history_rows.iter().find(|r| r.id == id).cloned() else {
+            return;
+        };
+        match act {
+            HistoryAction::Details => {
+                self.history_open = if self.history_open.as_deref() == Some(id) {
+                    None
+                } else {
+                    Some(id.to_string())
+                };
+            }
+            HistoryAction::Restore => {
+                self.submit(Job::Restore {
+                    source: RestoreSource::Snapshot(id.to_string()),
+                });
+            }
+            HistoryAction::Reveal => {
+                worker::reveal(std::path::Path::new(&row.path));
+            }
+            HistoryAction::MarkA | HistoryAction::MarkB => {
+                let slot = usize::from(act == HistoryAction::MarkB);
+                // Tapping a marked row clears that slot, so a mis-click is
+                // undoable without a separate Reset.
+                if self.history_cmp.get(slot) == Some(&row.id) {
+                    self.history_cmp.remove(slot);
+                } else if slot < self.history_cmp.len() {
+                    self.history_cmp[slot] = row.id.clone();
+                } else {
+                    self.history_cmp.push(row.id.clone());
+                }
+                self.recompute_compare();
+            }
+        }
+    }
+
+    /// Marks the entry the detail panel shows, and its raw values.
+    fn history_detail(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.history_open.clone() else {
+            return;
+        };
+        let Some(row) = self.history_rows.iter().find(|r| r.id == id).cloned() else {
+            self.history_open = None;
+            return;
+        };
+        let dark = ui.visuals().dark_mode;
+        let changes = row.changes.clone();
+        let busy = self.busy;
+
+        section(ui, "Entry detail");
+        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+            egui::Grid::new("history-detail")
+                .num_columns(2)
+                .spacing([18.0, 2.0])
+                .show(ui, |ui| {
+                    for (k, v) in [
+                        ("When", row.created.clone()),
+                        ("Event", row.event.clone()),
+                        ("Mode", row.mode.clone()),
+                        ("Kind", row.kind.to_string()),
+                        ("Settings captured", row.settings.to_string()),
+                        (
+                            "Changed vs previous",
+                            row.delta_prev
+                                .map(|d| d.to_string())
+                                .unwrap_or_else(|| "— (oldest entry)".into()),
+                        ),
+                        ("Snapshot id", row.id.clone()),
+                        ("File", row.path.clone()),
+                    ] {
+                        ui.label(
+                            RichText::new(k)
+                                .size(11.5)
+                                .strong()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        ui.label(
+                            RichText::new(v)
+                                .size(11.5)
+                                .monospace()
+                                .color(ui.visuals().text_color()),
+                        );
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        !busy,
+                        egui::Button::new(format!("Restore {}", row.created)),
+                    )
+                    .clicked()
+                {
+                    self.submit(Job::Restore {
+                        source: RestoreSource::Snapshot(row.id.clone()),
+                    });
+                }
+                if ui.button("Open backup folder").clicked() {
+                    worker::open_backup_folder();
+                }
+                if ui.small_button("Close").clicked() {
+                    self.history_open = None;
+                }
+            });
+        });
+        ui.add_space(6.0);
+        change_table(
+            ui,
+            "SETTING",
+            "BEFORE",
+            "AFTER",
+            &changes,
+            "No differences.",
+        );
+    }
+
+    /// A vs B: any two entries, in either order, not just neighbours.
+    fn history_compare(&mut self, ui: &mut egui::Ui) {
+        if self.history_cmp.is_empty() {
+            return;
+        }
+        let dark = ui.visuals().dark_mode;
+        section(ui, "Comparison");
+
+        let a_id = self.history_cmp.first().cloned().unwrap_or_default();
+        let b_id = self.history_cmp.get(1).cloned();
+        let a_row = self.history_rows.iter().find(|r| r.id == a_id).cloned();
+
+        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+            ui.horizontal(|ui| {
+                match &a_row {
+                    Some(a) => ui.label(
+                        RichText::new(format!(
+                            "A  {}  \u{2022}  {}",
+                            a.created, a.event
+                        ))
+                        .size(12.0)
+                        .strong()
+                        .color(ui.visuals().text_color()),
+                    ),
+                    None => ui.label(
+                        RichText::new("A  \u{2014}")
+                            .size(12.0)
+                            .color(ui.visuals().weak_text_color()),
+                    ),
+                }
+                match &b_id {
+                    Some(b) => {
+                        let row = self.history_rows.iter().find(|r| &r.id == b);
+                        let label = row
+                            .map(|r| format!("{}  \u{2022}  {}", r.created, r.event))
+                            .unwrap_or_else(|| b.clone());
+                        ui.label(
+                            RichText::new(format!("B  {label}"))
+                                .size(12.0)
+                                .strong()
+                                .color(ui.visuals().text_color()),
+                        );
+                    }
+                    None => ui.label(
+                        RichText::new("B  \u{2014} pick a second entry with the B button")
+                            .size(12.0)
+                            .color(ui.visuals().weak_text_color()),
+                    ),
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.small_button("Clear marks").clicked() {
+                        self.history_cmp.clear();
+                        self.history_cmp_diff = None;
+                    }
+                });
+            });
+        });
+
+        let Some(diff) = self.history_cmp_diff.clone() else {
+            return;
+        };
+        ui.add_space(6.0);
+        let count = diff.len();
+        ui.label(
+            RichText::new(match count {
+                0 => "Both entries hold identical values.".to_string(),
+                n => format!("{n} setting{} differ between A and B.", if n == 1 { "" } else { "s" }),
+            })
+            .size(12.0)
+            .color(if count == 0 {
+                ok_color()
+            } else {
+                ui.visuals().text_color()
+            }),
+        );
+        change_table(ui, "SETTING", "A", "B", &diff, "No differences.");
+    }
+
+    /// Diffs the two marked entries and caches the result, so the panel costs
+    /// no file IO per frame. Returns early (and clears the cache) unless both
+    /// slots are filled.
+    fn recompute_compare(&mut self) {
+        self.history_cmp_diff = None;
+        let (Some(a_id), Some(b_id)) = (self.history_cmp.first().cloned(), self.history_cmp.get(1).cloned())
+        else {
+            return;
+        };
+        let read = |rows: &[HistoryRow], id: &str| {
+            rows.iter()
+                .find(|r| r.id == id)
+                .and_then(|r| std::fs::read_to_string(&r.path).ok())
+                .map(|t| backup::parse_backup(&t))
+                .unwrap_or_default()
+        };
+        let (a, b) = (
+            read(&self.history_rows, &a_id),
+            read(&self.history_rows, &b_id),
+        );
+        self.history_cmp_diff = Some(diff_details(&a, &b, &setting_labels()));
+    }
+}
+
+/// The neutral fill for an unmarked A/B button: quiet enough to read as
+/// secondary next to the filled, accent-coloured marked state.
+fn else_fill(dark: bool) -> egui::Color32 {
+    if dark {
+        egui::Color32::from_gray(48)
+    } else {
+        egui::Color32::from_gray(238)
+    }
+}
+
+/// A three-column table of before→after pairs, used by both the expanded row
+/// and the detail/compare panels so the two never render differently.
+fn change_table(
+    ui: &mut egui::Ui,
+    head_a: &str,
+    head_b: &str,
+    head_c: &str,
+    changes: &[(String, String, String)],
+    empty_text: &str,
+) {
+    if changes.is_empty() {
+        ui.label(
+            RichText::new(empty_text)
+                .size(11.5)
+                .color(ui.visuals().weak_text_color()),
+        );
+        return;
+    }
+    egui::Grid::new("change-table")
+        .num_columns(3)
+        .spacing([18.0, 3.0])
+        .show(ui, |ui| {
+            for head in [head_a, head_b, head_c] {
+                ui.label(
+                    RichText::new(head)
+                        .size(10.5)
+                        .strong()
+                        .color(ui.visuals().weak_text_color()),
+                );
+            }
+            ui.end_row();
+            for (label, before, after) in changes {
+                ui.label(RichText::new(label.clone()).size(11.5));
+                ui.label(
+                    RichText::new(before.clone())
+                        .size(11.5)
+                        .monospace()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.label(
+                    RichText::new(after.clone())
+                        .size(11.5)
+                        .monospace()
+                        .color(ui.visuals().text_color()),
+                );
+                ui.end_row();
+            }
+        });
+}
 
     // ------------------------------------------------------------- settings --
 

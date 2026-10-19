@@ -649,3 +649,90 @@ fn modes_pick_the_fan_profile_we_expect() {
         FanMode::Turbo
     );
 }
+
+// ------------------------------------------------------- history tab view --
+//
+// The History tab grew filters, a search field and an A/B comparison on top
+// of the plain list. These cover the pure parts - the ones that can be wrong
+// without the UI looking wrong.
+
+#[test]
+fn history_filter_narrows_by_kind() {
+    use crate::ui::HistoryFilter;
+    // "All" must never hide anything, including a kind it does not know.
+    assert!(HistoryFilter::All.matches("auto"));
+    assert!(HistoryFilter::All.matches("manual"));
+    assert!(HistoryFilter::All.matches("something-new"));
+    assert!(HistoryFilter::Auto.matches("auto"));
+    assert!(!HistoryFilter::Auto.matches("manual"));
+    assert!(HistoryFilter::Manual.matches("manual"));
+    assert!(!HistoryFilter::Manual.matches("auto"));
+    // A filter must be exact, never a prefix match that could catch the wrong
+    // rows ("manual" would otherwise match "automatically-written").
+    assert!(!HistoryFilter::Manual.matches("auto"));
+}
+
+#[test]
+fn history_diff_lists_only_settings_that_moved() {
+    use crate::ui::diff_details;
+    let row = |setting: &str, ac: u32, dc: u32| backup::RestoreRow {
+        subgroup: "54533251-82be-4824-96c1-47b60b740d00".into(),
+        setting: setting.into(),
+        ac,
+        dc,
+    };
+    let a = "bc5038f7-23e0-4960-96da-33abaf5935ec";
+    let b = "893dee8e-2bef-41e0-89c6-b55d0929964c";
+    let old = vec![row(a, 70, 70), row(b, 5, 5)];
+    let labels = crate::ui::setting_labels();
+
+    // Identical snapshots produce no rows, which is what the compare panel
+    // reports as "both entries hold identical values".
+    assert!(diff_details(&old, &old, &labels).is_empty());
+
+    let new = vec![row(a, 60, 60), row(b, 5, 5)];
+    let d = diff_details(&old, &new, &labels);
+    assert_eq!(d.len(), 1, "only the moved setting is listed: {d:?}");
+    assert_eq!((d[0].1.as_str(), d[0].2.as_str()), ("70", "60"));
+
+    // A setting that vanishes shows an explicit dash, never a zero.
+    let shorter = vec![row(a, 70, 70)];
+    let d = diff_details(&old, &shorter, &labels);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].2.as_str(), "\u{2014}", "vanished reads as a dash");
+}
+
+#[test]
+fn history_diff_renders_split_ac_dc_values() {
+    use crate::ui::diff_details;
+    let row = |ac: u32, dc: u32| backup::RestoreRow {
+        subgroup: "54533251-82be-4824-96c1-47b60b740d00".into(),
+        setting: "be337238-0d75-4bea-bf53-8f4f47c01679".into(), // lid action
+        ac,
+        dc,
+    };
+    let labels = crate::ui::setting_labels();
+    // Equal columns print as one number; differing ones print both, because
+    // that is exactly the information the history is meant to surface.
+    let d = diff_details(&[row(1, 1)], &[row(1, 0)], &labels);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].1.as_str(), "1");
+    assert_eq!(d[0].2.as_str(), "1 / 0");
+}
+
+#[test]
+fn setting_labels_cover_every_planned_setting() {
+    // A label map missing an entry would fall back to printing a raw GUID in
+    // the detail view, which is exactly the leak the map exists to prevent.
+    let labels = crate::ui::setting_labels();
+    let (_, entries) = profile::plan(Mode::Quiet, true);
+    for e in &entries {
+        assert!(
+            labels.contains_key(e.setting),
+            "no label for {} ({})",
+            e.label,
+            e.setting
+        );
+    }
+    assert_eq!(labels.len(), profile::DEFS.len());
+}

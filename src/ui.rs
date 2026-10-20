@@ -302,6 +302,9 @@ pub struct App {
     /// only ever peeks with `try_lock`, so a slow sensor cannot stall a frame.
     temps: Arc<std::sync::Mutex<crate::temps::Temps>>,
     temps_stop: Arc<AtomicBool>,
+    /// Whether the window is on screen. The sensor thread only spawns
+    /// processes while this is set, so the tray state costs nothing.
+    temps_visible: Arc<AtomicBool>,
     /// Rendered History rows plus the snapshot ids they were built from. The
     /// file parsing behind them runs only when the list itself changes.
     history_ids: Vec<String>,
@@ -350,7 +353,7 @@ impl App {
     ) -> Self {
         let on_ac = crate::power::on_ac_power();
         let (snapshots, archives, backup_dir, has_factory) = Self::state().unwrap_or_default();
-        let (temps, temps_stop) = crate::temps::spawn();
+        let (temps, temps_stop, temps_visible) = crate::temps::spawn(!start_hidden);
 
         let mut app = App {
             ctx,
@@ -382,6 +385,7 @@ impl App {
             quit_requested: false,
             temps,
             temps_stop,
+            temps_visible,
             setup_attempted: false,
             setup_rx: None,
             interactive: !autostarted && !start_hidden,
@@ -479,11 +483,13 @@ impl App {
     }
 
     fn hide_to_tray(&self) {
+        self.temps_visible.store(false, Ordering::Relaxed);
         self.ctx
             .send_viewport_cmd(egui::ViewportCommand::Visible(false));
     }
 
     fn show_window(&self) {
+        self.temps_visible.store(true, Ordering::Relaxed);
         self.ctx
             .send_viewport_cmd(egui::ViewportCommand::Visible(true));
         self.ctx
@@ -643,6 +649,8 @@ impl App {
                 TrayCommand::Quit => {
                     self.stop_watch.store(true, Ordering::Relaxed);
                     self.temps_stop.store(true, Ordering::Relaxed);
+                self.temps_visible.store(false, Ordering::Relaxed);
+                    self.temps_visible.store(false, Ordering::Relaxed);
                     self.quit_requested = true;
                     self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -894,6 +902,8 @@ impl eframe::App for App {
                     if ui.button("Quit").clicked() {
                         self.stop_watch.store(true, Ordering::Relaxed);
                         self.temps_stop.store(true, Ordering::Relaxed);
+                self.temps_visible.store(false, Ordering::Relaxed);
+                    self.temps_visible.store(false, Ordering::Relaxed);
                         self.quit_requested = true;
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -2784,6 +2794,7 @@ impl App {
             if ui.button("Quit").clicked() {
                 self.stop_watch.store(true, Ordering::Relaxed);
                 self.temps_stop.store(true, Ordering::Relaxed);
+                self.temps_visible.store(false, Ordering::Relaxed);
                 self.quit_requested = true;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }

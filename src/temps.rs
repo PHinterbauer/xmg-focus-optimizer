@@ -39,13 +39,17 @@ pub struct Temps {
     pub cpu: Option<f32>,
 }
 
-/// Starts the poller. Returns the shared latest reading plus a flag that stops
-/// the thread; set it on quit.
-pub fn spawn() -> (Arc<Mutex<Temps>>, Arc<AtomicBool>) {
+/// Starts the poller. Returns the shared latest reading, a flag that stops the
+/// thread on quit, and a flag the UI flips to say the window is on screen.
+/// The thread only spawns sensor processes while that flag is set, so a laptop
+/// sitting in the tray does not pay for a PowerShell every 20 s.
+pub fn spawn(initial_visible: bool) -> (Arc<Mutex<Temps>>, Arc<AtomicBool>, Arc<AtomicBool>) {
     let shared = Arc::new(Mutex::new(Temps::default()));
     let stop = Arc::new(AtomicBool::new(false));
+    let visible = Arc::new(AtomicBool::new(initial_visible));
     let shared2 = shared.clone();
     let stop2 = stop.clone();
+    let visible2 = visible.clone();
 
     std::thread::Builder::new()
         .name("xmg-temps".into())
@@ -53,24 +57,29 @@ pub fn spawn() -> (Arc<Mutex<Temps>>, Arc<AtomicBool>) {
             log_info!("temperature poller started");
             let mut cpu_skip = 0u32;
             while !stop2.load(Ordering::Relaxed) {
+                // Cheap sleep while the window is hidden. No sensor process is
+                // spawned, so the tray state costs nothing but a wakeup.
+                if !visible2.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(250));
+                    continue;
+                }
                 let t = poll_once(&mut cpu_skip);
                 if let Ok(mut g) = shared2.lock() {
                     *g = t;
                 }
-                // Sleep in small slices so quitting does not wait out a full
-                // interval with the window already gone.
-                for _ in 0..20 {
-                    if stop2.load(Ordering::Relaxed) {
+                // Sleep in small slices so quitting or hiding reacts promptly.
+                for _ in 0..(POLL.as_millis() as usize / 250) {
+                    if stop2.load(Ordering::Relaxed) || !visible2.load(Ordering::Relaxed) {
                         break;
                     }
-                    std::thread::sleep(POLL / 20);
+                    std::thread::sleep(Duration::from_millis(250));
                 }
             }
             log_info!("temperature poller stopped");
         })
         .ok();
 
-    (shared, stop)
+    (shared, stop, visible)
 }
 
 /// Polls to skip after an empty CPU answer before probing again. WMI thermal

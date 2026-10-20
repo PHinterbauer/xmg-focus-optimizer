@@ -618,11 +618,10 @@ impl App {
                 Err(e) => self.note(
                     format!(
                         "automatic setup did not finish ({e}). Charger auto-switch \
-                         needs the background task. If clicking 'Set up now' does \
-                         nothing, Smart App Control is almost certainly blocking \
-                         the elevated helper - add this folder as an exclusion \
-                         (Windows Security → App & browser control → \
-                         Exclusions) and retry."
+                         needs the background task. Click 'Open Windows Security' in \
+                         Settings → Elevation, add this folder as an exclusion, then \
+                         retry. This is a one-time step - after that, setup runs \
+                         automatically on every launch.",
                     ),
                     NoteKind::Warn,
                 ),
@@ -696,12 +695,10 @@ impl App {
                             "charger changed to {} - settings NOT re-applied: \
                              the background task is not registered yet. The unplug \
                              did not cause this; it only revealed it. Open \
-                             Settings → Elevation → Set up now (one UAC prompt), \
-                             or run the app once as administrator. If nothing \
-                             happens when you click it, Smart App Control is \
-                             blocking the elevated helper - add this folder as \
-                             an exclusion first (Windows Security → App & \
-                             browser control → Exclusions).",
+                             Settings → Elevation → 'Open Windows Security', add \
+                             this folder as an exclusion, then 'Set up now'. This \
+                             is a one-time step - after that, setup runs \
+                             automatically on every launch.",
                             if on_ac { "mains" } else { "battery" }
                         ),
                         NoteKind::Warn,
@@ -2768,16 +2765,35 @@ impl App {
                     .size(11.5)
                     .color(ui.visuals().weak_text_color()),
                 );
-                if ui.button("Set up now").clicked() {
-                    match elevate::ensure_setup() {
-                        Ok(true) => {
-                            self.elevated_ready = true;
-                            self.note("background task registered", NoteKind::Ok);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Set up now").clicked() {
+                        match elevate::ensure_setup() {
+                            Ok(true) => {
+                                self.elevated_ready = true;
+                                self.note("background task registered", NoteKind::Ok);
+                            }
+                            Ok(false) => self.note("setup incomplete", NoteKind::Warn),
+                            Err(e) => self.note(e, NoteKind::Err),
                         }
-                        Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                        Err(e) => self.note(e, NoteKind::Err),
                     }
-                }
+                    if ui
+                        .button("Open Windows Security")
+                        .on_hover_text(
+                            "Opens Windows Security so you can add this folder as an \
+                             exclusion. Only needed once - after that, setup runs \
+                             automatically on every launch.",
+                        )
+                        .clicked()
+                    {
+                        sysutil::open_windows_security();
+                        self.note(
+                            "Windows Security opened - add this folder under App & \
+                             browser control → Exclusions, then click 'Set up now' again.",
+                            NoteKind::Ok,
+                        );
+                    }
+                });
             }
         });
 

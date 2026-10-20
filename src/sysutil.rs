@@ -124,9 +124,21 @@ pub fn notify_existing_instance(name: &str) {
     }
 }
 
-/// Converts a Rust string to a NUL-terminated UTF-16 buffer.
-pub fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+/// Opens the Windows Security app so the user can add a folder exclusion.
+/// Smart App Control blocks unsigned binaries from running elevated, which
+/// prevents the one-time setup from registering the background task. The
+/// exclusion is the one-time fix; after that, setup runs automatically.
+pub fn open_windows_security() {
+    // ms-settings:windowsdefender opens the Windows Security main page.
+    // If that URI is unavailable, fall back to launching the app directly.
+    let _ = std::process::Command::new("explorer.exe")
+        .arg("ms-settings:windowsdefender")
+        .spawn()
+        .or_else(|_| {
+            std::process::Command::new("explorer.exe")
+                .arg("windowsdefender:")
+                .spawn()
+        });
 }
 
 // ------------------------------------------------------- child processes ---

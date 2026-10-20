@@ -610,8 +610,14 @@ impl App {
                     NoteKind::Warn,
                 ),
                 Err(e) => self.note(
-                    format!("automatic setup declined or failed ({e}) - charger \
-                             auto-switch needs the task; retry in Settings → Elevation"),
+                    format!(
+                        "automatic setup did not finish ({e}). Charger auto-switch \
+                         needs the background task. If clicking 'Set up now' does \
+                         nothing, Smart App Control is almost certainly blocking \
+                         the elevated helper - add this folder as an exclusion \
+                         (Windows Security → App & browser control → \
+                         Exclusions) and retry."
+                    ),
                     NoteKind::Warn,
                 ),
             }
@@ -680,8 +686,14 @@ impl App {
                     self.note(
                         format!(
                             "charger changed to {} - settings NOT re-applied: \
-                             background task missing. Open Settings → Elevation \
-                             → Set up now (or run once as administrator).",
+                             the background task is not registered yet. The unplug \
+                             did not cause this; it only revealed it. Open \
+                             Settings → Elevation → Set up now (one UAC prompt), \
+                             or run the app once as administrator. If nothing \
+                             happens when you click it, Smart App Control is \
+                             blocking the elevated helper - add this folder as \
+                             an exclusion first (Windows Security → App & \
+                             browser control → Exclusions).",
                             if on_ac { "mains" } else { "battery" }
                         ),
                         NoteKind::Warn,
@@ -1965,12 +1977,15 @@ impl App {
         // Rows are a grid, not stacked horizontals with a right-aligned button
         // each. Right-alignment inside separate horizontals drifts from row to
         // row as content widths differ; grid columns line up by construction.
-        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-            if rows.is_empty() {
-                ui.label(
-                    RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
-                );
-            }
+        // No nested ScrollArea here: a scrollbar inside one would make this
+        // grid narrower than the toolbar above it, which is exactly the
+        // misalignment the screenshot shows. The outer page scroller handles
+        // a long list.
+        if rows.is_empty() {
+            ui.label(
+                RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
+            );
+        } else {
             egui::Grid::new("snapshot-rows")
                 .num_columns(3)
                 .spacing([14.0, 6.0])
@@ -1996,8 +2011,10 @@ impl App {
                         ui.end_row();
                     }
                 });
-        });
+        }
 
+        // The archives grid shares the same width as the rest of the page now
+        // that nothing is wrapped in a nested scroller.
         if !self.archives.is_empty() {
             ui.add_space(10.0);
             section(ui, "Archived initial backups");
@@ -2045,6 +2062,23 @@ impl App {
         let dark = ui.visuals().dark_mode;
         ui.add_space(4.0);
 
+        // Plain-language key to the controls below. The buttons are short on
+        // purpose (they sit in a dense grid), so the explanation lives here
+        // rather than in each label.
+        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+            ui.label(
+                RichText::new(
+                    "Each row is a snapshot taken before a change. \
+                     Details opens that entry's full setting list. \
+                     A and B mark two entries to compare them below. \
+                     Restore is the only button here that changes anything.",
+                )
+                .size(12.0)
+                .color(ui.visuals().text_color()),
+            );
+        });
+        ui.add_space(6.0);
+
         if self.snapshots.is_empty() {
             panel_card(ui, accent(Mode::Quiet, dark), |ui| {
                 ui.label(
@@ -2064,6 +2098,23 @@ impl App {
             });
             return;
         }
+
+        // Plain-language key to the controls below. The buttons are short on
+        // purpose (they sit in a dense grid), so the explanation lives here
+        // rather than in each label.
+        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+            ui.label(
+                RichText::new(
+                    "Each row is a snapshot taken before a change. \
+                     Details opens that entry's full setting list. \
+                     A and B mark two entries to compare them below. \
+                     Restore is the only button here that changes anything.",
+                )
+                .size(12.0)
+                .color(ui.visuals().text_color()),
+            );
+        });
+        ui.add_space(6.0);
 
         // Rebuilt only when the snapshot list itself changes: parsing every
         // file on every frame would do real IO sixty times a second for
@@ -2286,7 +2337,8 @@ impl App {
                         }
                         if ui
                             .small_button("Details")
-                            .on_hover_text("Show every setting captured in this entry.")
+                            .on_hover_text("Show every setting captured in this entry, \
+                                            before and after.")
                             .clicked()
                         {
                             self.history_act = Some((r.id.clone(), HistoryAction::Details));
@@ -2319,9 +2371,9 @@ impl App {
                                 ui.visuals().weak_text_color()
                             };
                             let mark_hint = if filled {
-                                format!("Clear comparison slot {label}.")
+                                format!("Slot {label} is set on this row. Click to clear it.")
                             } else {
-                                format!("Mark this entry as {label} for the comparison.")
+                                format!("Mark this row as slot {label}.")
                             };
                             let b = egui::Button::new(
                                 RichText::new(label).size(11.0).strong().color(mark_text),
@@ -2698,7 +2750,10 @@ impl App {
                 ui.label(
                     RichText::new(
                         "Power settings can only be changed by an elevated process. One \
-                         confirmation now avoids a prompt on every click later.",
+                         confirmation now avoids a prompt on every click later. If the \
+                         button does nothing at all, Smart App Control is blocking the \
+                         elevated helper - add this folder as an exclusion first \
+                         (Windows Security → App & browser control → Exclusions).",
                     )
                     .size(11.5)
                     .color(ui.visuals().weak_text_color()),

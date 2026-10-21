@@ -305,6 +305,8 @@ pub struct App {
     /// Whether the window is on screen. The sensor thread only spawns
     /// processes while this is set, so the tray state costs nothing.
     temps_visible: Arc<AtomicBool>,
+    /// Stops the repaint ticker thread on quit.
+    repaint_stop: Arc<AtomicBool>,
     /// Rendered History rows plus the snapshot ids they were built from. The
     /// file parsing behind them runs only when the list itself changes.
     history_ids: Vec<String>,
@@ -354,6 +356,26 @@ impl App {
         let on_ac = crate::power::on_ac_power();
         let (snapshots, archives, backup_dir, has_factory) = Self::state().unwrap_or_default();
         let (temps, temps_stop, temps_visible) = crate::temps::spawn(!start_hidden);
+
+        // Repaint ticker: when the window is hidden (tray), the eframe event
+        // loop may not fire timer-based repaints reliably. This thread wakes
+        // the UI every 250 ms so tray polling, monitor events and job results
+        // keep being processed without rendering continuously.
+        let repaint_stop = Arc::new(AtomicBool::new(false));
+        let repaint_stop2 = repaint_stop.clone();
+        let ctx2 = ctx.clone();
+        let visible2 = temps_visible.clone();
+        std::thread::Builder::new()
+            .name("xmg-repaint-ticker".into())
+            .spawn(move || {
+                while !repaint_stop2.load(Ordering::Relaxed) {
+                    if !visible2.load(Ordering::Relaxed) {
+                        ctx2.request_repaint();
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            })
+            .ok();
 
         let mut app = App {
             ctx,
@@ -430,6 +452,7 @@ impl App {
                 control_fans: app.settings.control_fans,
                 control_gpu: app.settings.control_gpu_limit,
                 control_display: app.settings.control_display,
+                on_ac: Some(app.on_ac),
             });
         }
         app
@@ -560,6 +583,7 @@ impl App {
             control_fans: s.control_fans,
             control_gpu: s.control_gpu_limit,
             control_display: s.control_display,
+            on_ac: Some(self.on_ac),
         });
     }
 
@@ -772,14 +796,13 @@ impl eframe::App for App {
         self.ensure_tray();
         self.poll_tray();
         self.poll_events();
-        // Something changed in the background; make sure a visible window repaints.
-        // When the window is hidden (tray only), repaint at 4 Hz instead of every
-        // frame: tray menu polling, monitor events and job results do not need
-        // 60 fps, and continuous rendering is the main CPU consumer in the tray.
+        // When visible, repaint every frame for smooth UI. When hidden (tray),
+        // a separate ticker thread (spawned in App::new) calls request_repaint()
+        // every 250 ms so logic() keeps running for tray polling and auto-switch.
+        // request_repaint_after() does not reliably wake the event loop while
+        // the window is hidden, which broke auto-switch detection.
         if self.temps_visible.load(std::sync::atomic::Ordering::Relaxed) {
             ctx.request_repaint();
-        } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
     }
 

@@ -154,6 +154,7 @@ fn run_cli_command(cmd: &str, args: &[String]) {
                 control_fans: settings.control_fans,
                 control_gpu: settings.control_gpu_limit,
                 control_display: settings.control_display,
+                on_ac: Some(crate::power::on_ac_power()),
             }
         }
         "restore" => {

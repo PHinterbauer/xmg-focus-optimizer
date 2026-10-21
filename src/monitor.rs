@@ -75,6 +75,7 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
                     control_fans: live.control_fans,
                     control_gpu: live.control_gpu_limit,
                     control_display: live.control_display,
+                    on_ac: Some(on_ac),
                 });
                 if ran {
                     let _ = tx.send(MonitorEvent::PowerChanged {

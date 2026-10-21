@@ -30,7 +30,8 @@ pub fn run(job: Job) -> JobResult {
             control_fans,
             control_gpu,
             control_display,
-        } => do_apply(mode, control_fans, control_gpu, control_display),
+            on_ac,
+        } => do_apply(mode, control_fans, control_gpu, control_display, on_ac),
         Job::Restore { source } => do_restore(&source),
     }
 }
@@ -92,7 +93,7 @@ fn create_factory(note: &str) -> JobResult {
 
 // ----------------------------------------------------------------- apply ---
 
-fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: bool) -> JobResult {
+fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: bool, on_ac: Option<bool>) -> JobResult {
     let mut r = JobResult {
         ok: true,
         summary: String::new(),
@@ -117,7 +118,9 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: 
         r.details.push("Initial backup present - preserved".into());
     }
 
-    let on_ac = power::on_ac_power();
+    // Use the power state the caller detected. Falling back to a fresh query
+    // keeps old job files (without the field) working.
+    let on_ac = on_ac.unwrap_or_else(power::on_ac_power);
     let (params, entries) = profile::plan(mode, on_ac);
 
     // Idempotence: if the active scheme already holds this mode's values for

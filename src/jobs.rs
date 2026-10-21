@@ -20,6 +20,12 @@ pub enum Job {
         control_fans: bool,
         control_gpu: bool,
         control_display: bool,
+        /// Power state at the time the job was queued. `None` means "query
+        /// it yourself" (old job files, CLI). Auto-switch passes the value it
+        /// just detected, because the worker's own query can lag behind the
+        /// charger event and write mains values onto a battery scheme.
+        #[serde(default)]
+        on_ac: Option<bool>,
     },
     /// Restore settings from a backup source.
     Restore { source: RestoreSource },

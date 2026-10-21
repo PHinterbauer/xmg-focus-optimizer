@@ -1,4 +1,4 @@
-//! Tests for the parts that must never silently go wrong.
+﻿//! Tests for the parts that must never silently go wrong.
 //!
 //! These cover the safety-critical logic: the exact values each mode writes,
 //! the tolerance that stops false drift warnings, and the strict parsing that

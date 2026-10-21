@@ -52,7 +52,7 @@ impl Tab {
         match self {
             Tab::Dashboard => "Pick a profile, or let the charger decide.",
             Tab::Backups => "Every change is snapshotted before it happens.",
-            Tab::History => "What changed and when — inspect, compare, restore.",
+            Tab::History => "What changed and when - inspect, compare, restore.",
             Tab::Settings => "How the app behaves, and how it looks.",
         }
     }
@@ -197,7 +197,7 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
                 event: backup::describe_reason(&s.label),
                 mode: backup::snapshot_mode(&s.label)
                     .map(|m| m.label().to_string())
-                    .unwrap_or_else(|| "—".into()),
+                    .unwrap_or_else(|| "-".into()),
                 kind: match s.kind {
                     backup::SnapshotKind::Automatic => "auto",
                     backup::SnapshotKind::Manual => "manual",
@@ -212,7 +212,7 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
 }
 
 /// Per-setting old?new pairs between two snapshots, in DEFS order. Newly
-/// appeared settings read from "—", vanished ones read to "—".
+/// appeared settings read from "-", vanished ones read to "-".
 pub(crate) fn diff_details(
     old: &[backup::RestoreRow],
     new: &[backup::RestoreRow],
@@ -245,8 +245,8 @@ pub(crate) fn diff_details(
             };
             out.push((
                 label,
-                o.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
-                n.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
+                o.map(|v| fmt(*v)).unwrap_or_else(|| "-".into()),
+                n.map(|v| fmt(*v)).unwrap_or_else(|| "-".into()),
             ));
         }
     }
@@ -577,7 +577,7 @@ impl App {
         let s = self.settings.clone();
         // Said out loud in the status bar, so there is a visible record that
         // the click registered before the (slow) worker reports back.
-        self.note(format!("Applying {}—", s.mode.label()), NoteKind::Ok);
+        self.note(format!("Applying {}-", s.mode.label()), NoteKind::Ok);
         self.submit(Job::Apply {
             mode: s.mode,
             control_fans: s.control_fans,
@@ -1020,24 +1020,24 @@ impl eframe::App for App {
                         // Live temperatures, peeked without blocking: the
                         // poller thread owns the data and the UI only reads.
                         // Both pills are always shown so the header layout never
-                        // jumps. A sensor with no data reads "—" with a tooltip
+                        // jumps. A sensor with no data reads "-" with a tooltip
                         // naming what was checked; no value is ever invented.
                         // Direct EC reads stay forbidden (see README), so on
-                        // machines without a WMI sensor "CPU —" is the honest
+                        // machines without a WMI sensor "CPU -" is the honest
                         // answer - running LibreHardwareMonitor fills it in.
                         if let Ok(t) = self.temps.try_lock() {
                             match t.gpu {
-                                Some(g) => pill(ui, &format!("GPU {g:.0}—"), g < 80.0),
+                                Some(g) => pill(ui, &format!("GPU {g:.0}-"), g < 80.0),
                                 None => {
-                                    pill_plain(ui, "GPU —").on_hover_text(
+                                    pill_plain(ui, "GPU -").on_hover_text(
                                         "No GPU reading - nvidia-smi gave no value.",
                                     );
                                 }
                             }
                             match t.cpu {
-                                Some(c) => pill(ui, &format!("CPU {c:.0}—"), c < 85.0),
+                                Some(c) => pill(ui, &format!("CPU {c:.0}-"), c < 85.0),
                                 None => {
-                                    pill_plain(ui, "CPU —").on_hover_text(
+                                    pill_plain(ui, "CPU -").on_hover_text(
                                         "No CPU sensor found - checked LibreHardwareMonitor, \
                                          OpenHardwareMonitor and the firmware zones \
                                          (MSAcpi plus the thermal-zone counter). Run \
@@ -1046,8 +1046,8 @@ impl eframe::App for App {
                                 }
                             }
                         } else {
-                            pill_plain(ui, "GPU —");
-                            pill_plain(ui, "CPU —");
+                            pill_plain(ui, "GPU -");
+                            pill_plain(ui, "CPU -");
                         }
                         if self.elevated_ready {
                             pill(ui, "Background task ready", true);
@@ -1513,7 +1513,7 @@ impl App {
                             );
                             ui.label(
                                 RichText::new(format!(
-                                    "{src_label}: CPU {}% — GPU {} W — {hz} — brightness {}% — fans {}",
+                                    "{src_label}: CPU {}% - GPU {} W - {hz} - brightness {}% - fans {}",
                                     sp.cpu_max,
                                     sp.gpu_watts,
                                     sp.brightness,
@@ -1548,7 +1548,7 @@ impl App {
             // used to vanish on light fills.
             let fill = accent(self.settings.mode, dark);
             let label = if self.busy {
-                format!("Applying {}—", self.settings.mode.label())
+                format!("Applying {}-", self.settings.mode.label())
             } else {
                 format!("Apply {}", self.settings.mode.label())
             };
@@ -1576,7 +1576,7 @@ impl App {
             if self.busy {
                 ui.spinner();
                 ui.label(
-                    RichText::new("Working— the app has not frozen.")
+                    RichText::new("Working- the app has not frozen.")
                         .size(12.0)
                         .color(ui.visuals().weak_text_color()),
                 );
@@ -2116,7 +2116,7 @@ impl App {
     /// files with one Restore each. This page is for *reading* history:
     /// filter it, search it, expand any entry to see exactly which settings
     /// it captured, compare any two entries against each other, and jump to
-    /// the file on disk. Only one thing it offers is a change — Restore,
+    /// the file on disk. Only one thing it offers is a change - Restore,
     /// because undoing is the point of keeping snapshots.
     fn history(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
@@ -2348,14 +2348,14 @@ impl App {
                         RichText::new(if r.settings > 0 {
                             format!("{}", r.settings)
                         } else {
-                            "—".into()
+                            "-".into()
                         })
                         .size(12.0)
                         .color(ui.visuals().text_color()),
                     );
                     ui.label(
                         RichText::new(
-                            r.delta_prev.map(|d| format!("{d}")).unwrap_or("—".into()),
+                            r.delta_prev.map(|d| format!("{d}")).unwrap_or("-".into()),
                         )
                         .size(12.0)
                         .color(ui.visuals().text_color()),
@@ -2499,7 +2499,7 @@ impl App {
                             "Changed vs previous",
                             row.delta_prev
                                 .map(|d| d.to_string())
-                                .unwrap_or_else(|| "— (oldest entry)".into()),
+                                .unwrap_or_else(|| "- (oldest entry)".into()),
                         ),
                         ("Snapshot id", row.id.clone()),
                         ("File", row.path.clone()),

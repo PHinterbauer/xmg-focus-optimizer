@@ -1,4 +1,4 @@
-//! The window.
+﻿//! The window.
 //!
 //! egui 0.36 splits the app entry point into two:
 //!
@@ -197,7 +197,7 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
                 event: backup::describe_reason(&s.label),
                 mode: backup::snapshot_mode(&s.label)
                     .map(|m| m.label().to_string())
-                    .unwrap_or_else(|| "-".into()),
+                    .unwrap_or_else(|| "—".into()),
                 kind: match s.kind {
                     backup::SnapshotKind::Automatic => "auto",
                     backup::SnapshotKind::Manual => "manual",
@@ -245,8 +245,8 @@ pub(crate) fn diff_details(
             };
             out.push((
                 label,
-                o.map(|v| fmt(*v)).unwrap_or_else(|| "-".into()),
-                n.map(|v| fmt(*v)).unwrap_or_else(|| "-".into()),
+                o.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
+                n.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
             ));
         }
     }
@@ -688,7 +688,7 @@ impl App {
                     self.on_ac = on_ac;
                     if triggered {
                         // Auto-switch just succeeded: the task is functional.
-                        // Do NOT call task_is_healthy() here — it can false-negative
+                        // Do NOT call task_is_healthy() here â€” it can false-negative
                         // (e.g. path mismatch on an older task copy) and make the
                         // "Setup needed" pill flicker on every charger change.
                         self.elevated_ready = true;

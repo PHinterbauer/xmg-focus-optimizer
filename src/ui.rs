@@ -1,4 +1,4 @@
-﻿//! The window.
+//! The window.
 //!
 //! egui 0.36 splits the app entry point into two:
 //!
@@ -52,7 +52,7 @@ impl Tab {
         match self {
             Tab::Dashboard => "Pick a profile, or let the charger decide.",
             Tab::Backups => "Every change is snapshotted before it happens.",
-            Tab::History => "What changed and when — inspect, compare, restore.",
+            Tab::History => "What changed and when � inspect, compare, restore.",
             Tab::Settings => "How the app behaves, and how it looks.",
         }
     }
@@ -137,7 +137,7 @@ struct HistoryRow {
     changes: Vec<(String, String, String)>,
 }
 
-/// Setting GUID → human label. One place so the History detail view, the
+/// Setting GUID ? human label. One place so the History detail view, the
 /// compare panel and the row builder never disagree on names.
 ///
 /// Both key and value are `&'static str` on purpose: `HashMap` is invariant
@@ -197,7 +197,7 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
                 event: backup::describe_reason(&s.label),
                 mode: backup::snapshot_mode(&s.label)
                     .map(|m| m.label().to_string())
-                    .unwrap_or_else(|| "—".into()),
+                    .unwrap_or_else(|| "�".into()),
                 kind: match s.kind {
                     backup::SnapshotKind::Automatic => "auto",
                     backup::SnapshotKind::Manual => "manual",
@@ -211,8 +211,8 @@ fn build_history_rows(snaps: &[SnapshotInfo]) -> Vec<HistoryRow> {
         .collect()
 }
 
-/// Per-setting old→new pairs between two snapshots, in DEFS order. Newly
-/// appeared settings read from "—", vanished ones read to "—".
+/// Per-setting old?new pairs between two snapshots, in DEFS order. Newly
+/// appeared settings read from "�", vanished ones read to "�".
 pub(crate) fn diff_details(
     old: &[backup::RestoreRow],
     new: &[backup::RestoreRow],
@@ -245,8 +245,8 @@ pub(crate) fn diff_details(
             };
             out.push((
                 label,
-                o.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
-                n.map(|v| fmt(*v)).unwrap_or_else(|| "—".into()),
+                o.map(|v| fmt(*v)).unwrap_or_else(|| "�".into()),
+                n.map(|v| fmt(*v)).unwrap_or_else(|| "�".into()),
             ));
         }
     }
@@ -321,7 +321,7 @@ pub struct App {
     /// were marked: first is A, second is B. Two marks make a comparison;
     /// a third mark replaces the older one so the flow never deadlocks.
     history_cmp: Vec<String>,
-    /// The A↔B diff, computed once when the second mark lands. Cached so the
+    /// The A?B diff, computed once when the second mark lands. Cached so the
     /// panel costs no file IO per frame.
     history_cmp_diff: Option<Vec<(String, String, String)>>,
     /// What a row's buttons asked for this frame, resolved after the grid
@@ -554,7 +554,7 @@ impl App {
         let s = self.settings.clone();
         // Said out loud in the status bar, so there is a visible record that
         // the click registered before the (slow) worker reports back.
-        self.note(format!("Applying {}…", s.mode.label()), NoteKind::Ok);
+        self.note(format!("Applying {}�", s.mode.label()), NoteKind::Ok);
         self.submit(Job::Apply {
             mode: s.mode,
             control_fans: s.control_fans,
@@ -612,7 +612,7 @@ impl App {
                     self.note("background task registered automatically", NoteKind::Ok);
                 }
                 Ok(false) => self.note(
-                    "automatic setup incomplete - retry in Settings → Elevation",
+                    "automatic setup incomplete - retry in Settings ? Elevation",
                     NoteKind::Warn,
                 ),
                 Err(e) => self.note(
@@ -620,8 +620,8 @@ impl App {
                         "automatic setup did not finish ({e}). Charger auto-switch \
                          needs the background task. Smart App Control has no \
                          exclusion list - if it is blocking the helper, disable SAC \
-                         (Windows Security → App & browser control → Smart App \
-                         Control → Off) or sign the binary (see SIGNING.md). This \
+                         (Windows Security ? App & browser control ? Smart App \
+                         Control ? Off) or sign the binary (see SIGNING.md). This \
                          is a one-time step.",
                     ),
                     NoteKind::Warn,
@@ -697,8 +697,8 @@ impl App {
                              the background task is not registered yet. The unplug \
                              did not cause this; it only revealed it. Smart App \
                              Control has no exclusion list - disable SAC \
-                             (Windows Security → App & browser control → Smart App \
-                             Control → Off) or sign the binary (see SIGNING.md), \
+                             (Windows Security ? App & browser control ? Smart App \
+                             Control ? Off) or sign the binary (see SIGNING.md), \
                              then restart the app. This is a one-time step.",
                             if on_ac { "mains" } else { "battery" }
                         ),
@@ -974,24 +974,24 @@ impl eframe::App for App {
                         // Live temperatures, peeked without blocking: the
                         // poller thread owns the data and the UI only reads.
                         // Both pills are always shown so the header layout never
-                        // jumps. A sensor with no data reads "–" with a tooltip
+                        // jumps. A sensor with no data reads "�" with a tooltip
                         // naming what was checked; no value is ever invented.
                         // Direct EC reads stay forbidden (see README), so on
-                        // machines without a WMI sensor "CPU –" is the honest
+                        // machines without a WMI sensor "CPU �" is the honest
                         // answer - running LibreHardwareMonitor fills it in.
                         if let Ok(t) = self.temps.try_lock() {
                             match t.gpu {
-                                Some(g) => pill(ui, &format!("GPU {g:.0}°"), g < 80.0),
+                                Some(g) => pill(ui, &format!("GPU {g:.0}�"), g < 80.0),
                                 None => {
-                                    pill_plain(ui, "GPU –").on_hover_text(
+                                    pill_plain(ui, "GPU �").on_hover_text(
                                         "No GPU reading - nvidia-smi gave no value.",
                                     );
                                 }
                             }
                             match t.cpu {
-                                Some(c) => pill(ui, &format!("CPU {c:.0}°"), c < 85.0),
+                                Some(c) => pill(ui, &format!("CPU {c:.0}�"), c < 85.0),
                                 None => {
-                                    pill_plain(ui, "CPU –").on_hover_text(
+                                    pill_plain(ui, "CPU �").on_hover_text(
                                         "No CPU sensor found - checked LibreHardwareMonitor, \
                                          OpenHardwareMonitor and the firmware zones \
                                          (MSAcpi plus the thermal-zone counter). Run \
@@ -1000,8 +1000,8 @@ impl eframe::App for App {
                                 }
                             }
                         } else {
-                            pill_plain(ui, "GPU –");
-                            pill_plain(ui, "CPU –");
+                            pill_plain(ui, "GPU �");
+                            pill_plain(ui, "CPU �");
                         }
                         if self.elevated_ready {
                             pill(ui, "Background task ready", true);
@@ -1009,7 +1009,7 @@ impl eframe::App for App {
                             // No button here on purpose: setup runs itself on
                             // launch (see App::ui auto-setup). This pill is
                             // only a status light for when that did not finish
-                            // - the way back is Settings → Elevation.
+                            // - the way back is Settings ? Elevation.
                             pill_warn(ui, "Setup needed");
                         }
                         ui.add_space(4.0);
@@ -1173,7 +1173,7 @@ fn nav_item(
     clicked
 }
 
-use crate::theme::{accent, card_bg, contrast_text, err_color, ok_color, surface, surface_stroke, warn_color};
+use crate::theme::{accent, card_bg, contrast_text, err_color, ok_color, stroke, surface, surface_stroke, warn_color};
 use crate::log::{log_debug, log_error, log_info, log_warn};
 
 /// How long a queued job may take before the UI stops waiting and unlocks.
@@ -1456,7 +1456,7 @@ impl App {
                         let live = src_ac == on_ac;
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(if live { "●" } else { "○" })
+                                RichText::new(if live { "?" } else { "?" })
                                     .size(11.0)
                                     .color(if live {
                                         tone
@@ -1466,7 +1466,7 @@ impl App {
                             );
                             ui.label(
                                 RichText::new(format!(
-                                    "{src_label}: CPU {}% · GPU {} W · {hz} · brightness {}% · fans {}",
+                                    "{src_label}: CPU {}% � GPU {} W � {hz} � brightness {}% � fans {}",
                                     sp.cpu_max,
                                     sp.gpu_watts,
                                     sp.brightness,
@@ -1501,7 +1501,7 @@ impl App {
             // used to vanish on light fills.
             let fill = accent(self.settings.mode, dark);
             let label = if self.busy {
-                format!("Applying {}…", self.settings.mode.label())
+                format!("Applying {}�", self.settings.mode.label())
             } else {
                 format!("Apply {}", self.settings.mode.label())
             };
@@ -1529,7 +1529,7 @@ impl App {
             if self.busy {
                 ui.spinner();
                 ui.label(
-                    RichText::new("Working… the app has not frozen.")
+                    RichText::new("Working� the app has not frozen.")
                         .size(12.0)
                         .color(ui.visuals().weak_text_color()),
                 );
@@ -1993,6 +1993,12 @@ impl App {
             ui.label(
                 RichText::new("No snapshots yet.").color(ui.visuals().weak_text_color()),
             );
+            ui.label(
+                RichText::new("Take a snapshot on the Backups tab to start the record.")
+                    .size(11.5)
+                    .color(ui.visuals().weak_text_color()),
+            );
+            );
         } else {
             egui::Grid::new("snapshot-rows")
                 .num_columns(3)
@@ -2064,31 +2070,14 @@ impl App {
     /// files with one Restore each. This page is for *reading* history:
     /// filter it, search it, expand any entry to see exactly which settings
     /// it captured, compare any two entries against each other, and jump to
-    /// the file on disk. Only one thing it offers is a change — Restore,
+    /// the file on disk. Only one thing it offers is a change � Restore,
     /// because undoing is the point of keeping snapshots.
     fn history(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
         ui.add_space(4.0);
 
-        // Plain-language key to the controls below. The buttons are short on
-        // purpose (they sit in a dense grid), so the explanation lives here
-        // rather than in each label.
-        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
-            ui.label(
-                RichText::new(
-                    "Each row is a snapshot taken before a change. \
-                     Details opens that entry's full setting list. \
-                     A and B mark two entries to compare them below. \
-                     Restore is the only button here that changes anything.",
-                )
-                .size(12.0)
-                .color(ui.visuals().text_color()),
-            );
-        });
-        ui.add_space(6.0);
-
         if self.snapshots.is_empty() {
-            panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+            panel_card(ui, stroke(dark), |ui| {
                 ui.label(
                     RichText::new("No activity yet.")
                         .strong()
@@ -2097,8 +2086,9 @@ impl App {
                 );
                 ui.label(
                     RichText::new(
-                        "The first entry appears the first time a mode is applied \
-                         or a snapshot is taken.",
+                        "Snapshots appear here automatically before every change. \
+                         Apply a mode or take a manual snapshot on the Backups tab \
+                         to start the record.",
                     )
                     .size(12.0)
                     .color(ui.visuals().weak_text_color()),
@@ -2110,11 +2100,11 @@ impl App {
         // Plain-language key to the controls below. The buttons are short on
         // purpose (they sit in a dense grid), so the explanation lives here
         // rather than in each label.
-        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             ui.label(
                 RichText::new(
                     "Each row is a snapshot taken before a change. \
-                     Details opens that entry's full setting list. \
+                     Inspect opens that entry's full setting list. \
                      A and B mark two entries to compare them below. \
                      Restore is the only button here that changes anything.",
                 )
@@ -2312,14 +2302,14 @@ impl App {
                         RichText::new(if r.settings > 0 {
                             format!("{}", r.settings)
                         } else {
-                            "—".into()
+                            "�".into()
                         })
                         .size(12.0)
                         .color(ui.visuals().text_color()),
                     );
                     ui.label(
                         RichText::new(
-                            r.delta_prev.map(|d| format!("{d}")).unwrap_or("—".into()),
+                            r.delta_prev.map(|d| format!("{d}")).unwrap_or("�".into()),
                         )
                         .size(12.0)
                         .color(ui.visuals().text_color()),
@@ -2344,19 +2334,12 @@ impl App {
                             self.history_act = Some((r.id.clone(), HistoryAction::Restore));
                         }
                         if ui
-                            .small_button("Details")
+                            .small_button("Inspect")
                             .on_hover_text("Show every setting captured in this entry, \
                                             before and after.")
                             .clicked()
                         {
                             self.history_act = Some((r.id.clone(), HistoryAction::Details));
-                        }
-                        if ui
-                            .small_button("File")
-                            .on_hover_text("Show this snapshot in Explorer.")
-                            .clicked()
-                        {
-                            self.history_act = Some((r.id.clone(), HistoryAction::Reveal));
                         }
                         // A/B marks: filled while the row is the marked slot,
                         // outlined otherwise. Two marks produce a comparison.
@@ -2396,7 +2379,7 @@ impl App {
                         // Marks the row whose detail panel is open below, so
                         // the table and the panel always agree.
                         if is_open {
-                            ui.label(RichText::new("▾").size(11.0).color(tone));
+                            ui.label(RichText::new("?").size(11.0).color(tone));
                         }
                     });
                     ui.end_row();
@@ -2455,7 +2438,7 @@ impl App {
         let busy = self.busy;
 
         section(ui, "Entry detail");
-        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             egui::Grid::new("history-detail")
                 .num_columns(2)
                 .spacing([18.0, 2.0])
@@ -2470,7 +2453,7 @@ impl App {
                             "Changed vs previous",
                             row.delta_prev
                                 .map(|d| d.to_string())
-                                .unwrap_or_else(|| "— (oldest entry)".into()),
+                                .unwrap_or_else(|| "� (oldest entry)".into()),
                         ),
                         ("Snapshot id", row.id.clone()),
                         ("File", row.path.clone()),
@@ -2503,6 +2486,9 @@ impl App {
                         source: RestoreSource::Snapshot(row.id.clone()),
                     });
                 }
+                if ui.button("Show in Explorer").clicked() {
+                    worker::reveal(std::path::Path::new(&row.path));
+                }
                 if ui.button("Open backup folder").clicked() {
                     worker::open_backup_folder();
                 }
@@ -2534,7 +2520,7 @@ impl App {
         let b_id = self.history_cmp.get(1).cloned();
         let a_row = self.history_rows.iter().find(|r| r.id == a_id).cloned();
 
-        panel_card(ui, accent(Mode::Quiet, dark), |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             ui.horizontal(|ui| {
                 // Both arms end in `;`, so each evaluates to `()`. A bare
                 // `ui.label(..)` without one returns `Response` and the two
@@ -2787,7 +2773,7 @@ impl App {
                     sysutil::open_windows_security();
                     self.note(
                         "Windows Security opened - disable Smart App Control \
-                         (App & browser control → Smart App Control → Off), \
+                         (App & browser control ? Smart App Control ? Off), \
                          then click 'Set up now' again.",
                         NoteKind::Ok,
                     );
@@ -2797,8 +2783,8 @@ impl App {
                     RichText::new(
                         "If the button does nothing at all, Smart App Control is blocking \
                          the elevated helper. SAC has no exclusion list - the only options \
-                         are to disable SAC (Windows Security → App & browser control → \
-                         Smart App Control → Off) or to sign the binary (see SIGNING.md).",
+                         are to disable SAC (Windows Security ? App & browser control ? \
+                         Smart App Control ? Off) or to sign the binary (see SIGNING.md).",
                     )
                     .size(11.0)
                     .color(ui.visuals().weak_text_color()),
@@ -2846,7 +2832,7 @@ fn else_fill(dark: bool) -> egui::Color32 {
     }
 }
 
-/// A three-column table of before→after pairs, used by the entry detail and
+/// A three-column table of before?after pairs, used by the entry detail and
 /// the A/B comparison so the two never render differently.
 fn change_table(
     ui: &mut egui::Ui,

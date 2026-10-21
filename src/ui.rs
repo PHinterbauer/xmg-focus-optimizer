@@ -620,8 +620,8 @@ impl App {
                         "automatic setup did not finish ({e}). Charger auto-switch \
                          needs the background task. Smart App Control has no \
                          exclusion list - if it is blocking the helper, disable SAC \
-                         (Windows Security ? App & browser control ? Smart App \
-                         Control ? Off) or sign the binary (see SIGNING.md). This \
+                         (Windows Security -> App & browser control -> Smart App \
+                         Control -> Off) or sign the binary (see SIGNING.md). This \
                          is a one-time step.",
                     ),
                     NoteKind::Warn,
@@ -661,12 +661,12 @@ impl App {
             match ev {
                 MonitorEvent::PowerChanged { on_ac, mode, triggered } => {
                     self.on_ac = on_ac;
-                    // The task may have appeared or vanished while running;
-                    // re-read it at the exact moment it matters.
-                    self.elevated_ready = elevate::task_is_healthy();
                     if triggered {
-                        // Say what the switch actually did, not just that it happened:
-                        // the headline numbers of the profile now in force.
+                        // Auto-switch just succeeded: the task is functional.
+                        // Do NOT call task_is_healthy() here — it can false-negative
+                        // (e.g. path mismatch on an older task copy) and make the
+                        // "Setup needed" pill flicker on every charger change.
+                        self.elevated_ready = true;
                         let p = profile::Params::for_mode(mode, on_ac);
                         self.note(
                             format!(
@@ -683,6 +683,9 @@ impl App {
                         );
                         self.drift_acknowledged = false;
                     }
+                    // Re-check immediately with the new power source. This may
+                    // read slightly stale settings (the worker hasn't finished
+                    // yet) - the job result picked up in poll_events corrects it.
                     self.recheck_drift();
                 }
                 MonitorEvent::AutoSwitchSkipped { on_ac, mode: _ } => {
@@ -697,9 +700,9 @@ impl App {
                              the background task is not registered yet. The unplug \
                              did not cause this; it only revealed it. Smart App \
                              Control has no exclusion list - disable SAC \
-                             (Windows Security ? App & browser control ? Smart App \
-                             Control ? Off) or sign the binary (see SIGNING.md), \
-                             then restart the app. This is a one-time step.",
+                             (Windows Security -> App & browser control -> Smart App \
+                             Control -> Off) or sign the binary (see SIGNING.md). \
+                             This is a one-time step.",
                             if on_ac { "mains" } else { "battery" }
                         ),
                         NoteKind::Warn,
@@ -744,6 +747,19 @@ impl App {
                         ),
                         NoteKind::Err,
                     );
+                }
+            }
+        } else {
+            // Pick up results from auto-switch jobs, which run without setting
+            // `busy`. Without this the drift check stays stale after a charger
+            // change because the PowerChanged handler rechecks before the worker
+            // has finished applying.
+            if let Some(r) = jobs::take_result() {
+                log_info!("auto-switch result picked up: ok={} {}", r.ok, r.summary);
+                self.refresh();
+                self.recheck_drift();
+                if !r.ok {
+                    self.note(format!("auto-switch failed: {}", r.summary), NoteKind::Err);
                 }
             }
         }
@@ -2773,7 +2789,7 @@ impl App {
                     sysutil::open_windows_security();
                     self.note(
                         "Windows Security opened - disable Smart App Control \
-                         (App & browser control ? Smart App Control ? Off), \
+                         (App & browser control -> Smart App Control -> Off), \
                          then click 'Set up now' again.",
                         NoteKind::Ok,
                     );
@@ -2783,8 +2799,8 @@ impl App {
                     RichText::new(
                         "If the button does nothing at all, Smart App Control is blocking \
                          the elevated helper. SAC has no exclusion list - the only options \
-                         are to disable SAC (Windows Security ? App & browser control ? \
-                         Smart App Control ? Off) or to sign the binary (see SIGNING.md).",
+                         are to disable SAC (Windows Security -> App & browser control -> \
+                         Smart App Control -> Off) or to sign the binary (see SIGNING.md).",
                     )
                     .size(11.0)
                     .color(ui.visuals().weak_text_color()),

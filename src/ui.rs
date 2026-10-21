@@ -2014,7 +2014,6 @@ impl App {
                     .size(11.5)
                     .color(ui.visuals().weak_text_color()),
             );
-            );
         } else {
             egui::Grid::new("snapshot-rows")
                 .num_columns(3)

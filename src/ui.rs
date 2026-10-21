@@ -372,7 +372,7 @@ impl App {
                     if !visible2.load(Ordering::Relaxed) {
                         ctx2.request_repaint();
                     }
-                    std::thread::sleep(Duration::from_millis(250));
+                    std::thread::sleep(std::time::Duration::from_millis(250));
                 }
             })
             .ok();
@@ -408,6 +408,7 @@ impl App {
             temps,
             temps_stop,
             temps_visible,
+            repaint_stop,
             setup_attempted: false,
             setup_rx: None,
             interactive: !autostarted && !start_hidden,

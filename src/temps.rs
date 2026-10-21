@@ -60,7 +60,7 @@ pub fn spawn(initial_visible: bool) -> (Arc<Mutex<Temps>>, Arc<AtomicBool>, Arc<
                 // Cheap sleep while the window is hidden. No sensor process is
                 // spawned, so the tray state costs nothing but a wakeup.
                 if !visible2.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_millis(250));
+                    std::thread::sleep(Duration::from_millis(500));
                     continue;
                 }
                 let t = poll_once(&mut cpu_skip);

@@ -773,7 +773,15 @@ impl eframe::App for App {
         self.poll_tray();
         self.poll_events();
         // Something changed in the background; make sure a visible window repaints.
-        ctx.request_repaint();
+        // When the window is hidden (tray only), repaint at 4 Hz instead of every
+        // frame: tray menu polling, monitor events and job results do not need
+        // 60 fps, and continuous rendering is the main CPU consumer in the tray.
+        let visible = ctx.input(|i| i.viewport().visible.unwrap_or(true));
+        if visible {
+            ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

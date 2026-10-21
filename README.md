@@ -156,24 +156,34 @@ that record into something you can actually read:
 
 ### If Windows still refuses to run it
 
-The binary is **unsigned**, so two different Windows checks can stop it. They need different fixes:
+The binary is **unsigned**, so two different Windows checks can stop it. They need
+different fixes:
 
 | What you see | Cause | Fix |
 |:--|:--|:--|
 | *"Windows protected your PC"* &rarr; **More info** &rarr; **Run anyway** | the file is marked as downloaded | `Unblock-File`, as above |
-| Nothing happens at all, no dialog | **Smart App Control** blocks unsigned binaries outright | add the folder as an exclusion |
+| Nothing happens at all, no dialog | **Smart App Control** blocks unsigned binaries outright | disable SAC (see below) |
 
-For the second case: **Windows Security &rarr; App & browser control &rarr; Exclusions &rarr; Add an
-exclusion &rarr; Folder**, and pick the folder holding the `.exe`.
+For the second case: **Windows Security → App & browser control → Smart App
+Control → Off**.
 
 > [!IMPORTANT]
-> **If the app ran before and does not now, this is almost certainly it.** Smart App Control starts
-> in a non-enforcing *evaluation* mode and can later switch to enforcing on its own, or the setting
-> gets flipped. Nothing about the binary changed &mdash; every build here is unsigned, including
-> the releases that used to run. The block is recorded as Code Integrity event **3033/3077**
-> (*"did not meet the Enterprise signing level requirements"*) in
-> `Microsoft-Windows-CodeIntegrity/Operational`. See [SIGNING.md](SIGNING.md) for the options that
-> remove the need for the exclusion entirely.
+> **Smart App Control has no exclusion list.** Unlike Windows Defender
+> SmartScreen, you cannot add a folder or file to an allowlist. The only options
+> are to disable SAC or to sign the binary.
+>
+> **If the app ran for you before and does not now, it is almost certainly this.**
+> Nothing about the binary changed. Smart App Control begins in a non-enforcing
+> *evaluation* mode and can switch to enforcing on its own, so a binary that ran
+> last week can be refused today with no change to the file.
+>
+> To confirm, look at `Microsoft-Windows-CodeIntegrity/Operational` in Event
+> Viewer. Events **3033** and **3077** reading *"did not meet the Enterprise
+> signing level requirements"* for `XMG-Optimizer.exe` mean Smart App Control
+> blocked it.
+>
+> Disabling SAC is a one-time, permanent change (you cannot easily re-enable it
+> afterwards). The alternative is code signing — see [SIGNING.md](SIGNING.md).
 
 <details>
 <summary><b>Command line reference</b></summary>

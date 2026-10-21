@@ -618,10 +618,11 @@ impl App {
                 Err(e) => self.note(
                     format!(
                         "automatic setup did not finish ({e}). Charger auto-switch \
-                         needs the background task. Click 'Open Windows Security' in \
-                         Settings → Elevation, add this folder as an exclusion, then \
-                         retry. This is a one-time step - after that, setup runs \
-                         automatically on every launch.",
+                         needs the background task. Smart App Control has no \
+                         exclusion list - if it is blocking the helper, disable SAC \
+                         (Windows Security → App & browser control → Smart App \
+                         Control → Off) or sign the binary (see SIGNING.md). This \
+                         is a one-time step.",
                     ),
                     NoteKind::Warn,
                 ),
@@ -694,11 +695,11 @@ impl App {
                         format!(
                             "charger changed to {} - settings NOT re-applied: \
                              the background task is not registered yet. The unplug \
-                             did not cause this; it only revealed it. Open \
-                             Settings → Elevation → 'Open Windows Security', add \
-                             this folder as an exclusion, then 'Set up now'. This \
-                             is a one-time step - after that, setup runs \
-                             automatically on every launch.",
+                             did not cause this; it only revealed it. Smart App \
+                             Control has no exclusion list - disable SAC \
+                             (Windows Security → App & browser control → Smart App \
+                             Control → Off) or sign the binary (see SIGNING.md), \
+                             then restart the app. This is a one-time step.",
                             if on_ac { "mains" } else { "battery" }
                         ),
                         NoteKind::Warn,
@@ -2757,43 +2758,51 @@ impl App {
                 ui.label(
                     RichText::new(
                         "Power settings can only be changed by an elevated process. One \
-                         confirmation now avoids a prompt on every click later. If the \
-                         button does nothing at all, Smart App Control is blocking the \
-                         elevated helper - add this folder as an exclusion first \
-                         (Windows Security → App & browser control → Exclusions).",
+                         confirmation now avoids a prompt on every click later.",
                     )
                     .size(11.5)
                     .color(ui.visuals().weak_text_color()),
                 );
                 ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Set up now").clicked() {
-                        match elevate::ensure_setup() {
-                            Ok(true) => {
-                                self.elevated_ready = true;
-                                self.note("background task registered", NoteKind::Ok);
-                            }
-                            Ok(false) => self.note("setup incomplete", NoteKind::Warn),
-                            Err(e) => self.note(e, NoteKind::Err),
+                if ui.button("Set up now").clicked() {
+                    match elevate::ensure_setup() {
+                        Ok(true) => {
+                            self.elevated_ready = true;
+                            self.note("background task registered", NoteKind::Ok);
                         }
+                        Ok(false) => self.note("setup incomplete", NoteKind::Warn),
+                        Err(e) => self.note(e, NoteKind::Err),
                     }
-                    if ui
-                        .button("Open Windows Security")
-                        .on_hover_text(
-                            "Opens Windows Security so you can add this folder as an \
-                             exclusion. Only needed once - after that, setup runs \
-                             automatically on every launch.",
-                        )
-                        .clicked()
-                    {
-                        sysutil::open_windows_security();
-                        self.note(
-                            "Windows Security opened - add this folder under App & \
-                             browser control → Exclusions, then click 'Set up now' again.",
-                            NoteKind::Ok,
-                        );
-                    }
-                });
+                }
+                if ui
+                    .button("Open Windows Security")
+                    .on_hover_text(
+                        "Opens Windows Security so you can disable Smart App \
+                         Control. SAC has no exclusion list, so disabling it \
+                         (or signing the binary) is the only way. Only needed \
+                         once - after that, setup runs automatically.",
+                    )
+                    .clicked()
+                {
+                    sysutil::open_windows_security();
+                    self.note(
+                        "Windows Security opened - disable Smart App Control \
+                         (App & browser control → Smart App Control → Off), \
+                         then click 'Set up now' again.",
+                        NoteKind::Ok,
+                    );
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "If the button does nothing at all, Smart App Control is blocking \
+                         the elevated helper. SAC has no exclusion list - the only options \
+                         are to disable SAC (Windows Security → App & browser control → \
+                         Smart App Control → Off) or to sign the binary (see SIGNING.md).",
+                    )
+                    .size(11.0)
+                    .color(ui.visuals().weak_text_color()),
+                );
             }
         });
 

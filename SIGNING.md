@@ -23,7 +23,8 @@ What the release notes already say:
 Unblock-File -LiteralPath ".\XMG-Optimizer.exe"
 ```
 
-Or Windows Security → App & browser control → **Exclusions** → add the folder. Smart App
+Or, for Smart App Control (which has no exclusion list): disable SAC under
+Windows Security → App & browser control → Smart App Control → Off. Smart App
 Control is the strict one; the older "Windows protected your PC" warning is not.
 
 Fine for yourself and a few people. Not fine for distribution.
@@ -61,6 +62,12 @@ the answer.
 
 Policy ID `{0283AC0F-FFF1-49AE-ADA1-8A933130CAD6}` in those events is Microsoft's own shipped
 policy, not anything configured on the machine.
+
+#### Important: SAC has no exclusion list
+
+Unlike Windows Defender SmartScreen, Smart App Control does **not** support exclusions. You cannot
+add a folder or file to an allowlist. The only options are to disable SAC entirely or to sign the
+binary. Any guidance suggesting otherwise is wrong.
 
 ### 2. Self-signed certificate, installed on each machine — free
 

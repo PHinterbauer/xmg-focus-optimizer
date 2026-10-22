@@ -787,6 +787,7 @@ impl App {
                 log_info!("auto-switch result picked up: ok={} {}", r.ok, r.summary);
                 self.refresh();
                 self.recheck_drift();
+                ctx.request_repaint();
                 if !r.ok {
                     self.note(format!("auto-switch failed: {}", r.summary), NoteKind::Err);
                 }
@@ -2877,7 +2878,7 @@ impl App {
     }
 
     /// Reset all settings to their defaults, with confirmation so a stray
-    /// click can't wipe the user's configuration.
+    /// click can't wipe the user's configuration. Saves immediately.
     fn reset_to_defaults(&mut self, ui: &mut egui::Ui, changed: &mut bool) {
         panel_card(ui, warn_color(), |ui| {
             if self.reset_confirm {
@@ -2900,9 +2901,16 @@ impl App {
                 ui.horizontal(|ui| {
                     if ui.button("Reset").clicked() {
                         self.settings = Settings::default();
-                        *changed = true;
-                        self.reset_confirm = false;
-                        self.note("settings reset to defaults", NoteKind::Warn);
+                        if let Err(e) = self.settings.save() {
+                            self.note(
+                                format!("could not save settings: {e}"),
+                                NoteKind::Err,
+                            );
+                        } else {
+                            *changed = true;
+                            self.reset_confirm = false;
+                            self.note("settings reset to defaults", NoteKind::Warn);
+                        }
                     }
                     if ui.button("Cancel").clicked() {
                         self.reset_confirm = false;

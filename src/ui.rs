@@ -317,6 +317,9 @@ pub struct App {
     /// Free-text filter over the history list (matches time, event, mode and
     /// the raw id). Pure view state, never persisted.
     history_search: String,
+    /// Reset-to-defaults confirmation state: false = idle, true = user clicked
+    /// "Reset" and is waiting to confirm or cancel.
+    reset_confirm: bool,
     /// Which rows the History tab lists. The Backups tab always shows all.
     history_filter: HistoryFilter,
     /// Snapshot ids picked for an arbitrary A/B comparison, in the order they
@@ -416,6 +419,7 @@ impl App {
             history_rows: Vec::new(),
             history_open: None,
             history_search: String::new(),
+            reset_confirm: false,
             history_filter: HistoryFilter::default(),
             history_cmp: Vec::new(),
             history_cmp_diff: None,
@@ -2840,6 +2844,10 @@ impl App {
         });
 
         ui.add_space(10.0);
+        section(ui, "Reset to defaults");
+        self.reset_to_defaults(ui, &mut changed, tone);
+
+        ui.add_space(10.0);
         section(ui, "Safety");
         self.safety_panel(ui);
 
@@ -2865,6 +2873,51 @@ impl App {
                 .size(11.5)
                 .color(ui.visuals().weak_text_color()),
             );
+        });
+    }
+
+    /// Reset all settings to their defaults, with confirmation so a stray
+    /// click can't wipe the user's configuration.
+    fn reset_to_defaults(&mut self, ui: &mut egui::Ui, changed: &mut bool, tone: egui::Color32) {
+        panel_card(ui, warn_color(), |ui| {
+            if self.reset_confirm {
+                ui.label(
+                    RichText::new("Reset all settings to defaults?")
+                        .strong()
+                        .size(13.0)
+                        .color(ui.visuals().text_color()),
+                );
+                ui.label(
+                    RichText::new(
+                        "This restores every setting — mode, power-watching, \
+                         fans, GPU limit, display, theme — to the factory \
+                         defaults the app applies on a fresh install.",
+                    )
+                    .size(11.5)
+                    .color(ui.visuals().weak_text_color()),
+                );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Reset").clicked() {
+                        *self.settings = Settings::default();
+                        *changed = true;
+                        self.reset_confirm = false;
+                        self.note("settings reset to defaults", NoteKind::Warn);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.reset_confirm = false;
+                    }
+                });
+            } else if ui
+                .button("Reset to defaults")
+                .on_hover_text(
+                    "Restore all settings — mode, power-watching, fans, GPU limit, \
+                     display, theme — to their factory defaults.",
+                )
+                .clicked()
+            {
+                self.reset_confirm = true;
+            }
         });
     }
 }

@@ -2154,7 +2154,7 @@ impl App {
                 RichText::new(
                     "Each row is a snapshot taken before a change. \
                      Inspect opens that entry's full setting list. \
-                     A and B mark two entries to compare them below. \
+                     Mark A and B on any two rows to compare them below. \
                      Restore is the only button here that changes anything.",
                 )
                 .size(12.0)
@@ -2393,8 +2393,8 @@ impl App {
                         // A/B marks: filled while the row is the marked slot,
                         // outlined otherwise. Two marks produce a comparison.
                         for (label, filled, act) in [
-                            ("A", is_a, HistoryAction::MarkA),
-                            ("B", is_b, HistoryAction::MarkB),
+                            ("Mark A", is_a, HistoryAction::MarkA),
+                            ("Mark B", is_b, HistoryAction::MarkB),
                         ] {
                             // Bound to locals first. An `if` without braces
                             // around its else arm is not accepted inside a
@@ -2413,12 +2413,12 @@ impl App {
                             let mark_hint = if filled {
                                 format!("Slot {label} is set on this row. Click to clear it.")
                             } else {
-                                format!("Mark this row as slot {label}.")
+                                format!("Mark this row as slot {label} for comparison.")
                             };
                             let b = egui::Button::new(
                                 RichText::new(label).size(11.0).strong().color(mark_text),
                             )
-                            .min_size(Vec2::new(22.0, 20.0))
+                            .min_size(Vec2::new(44.0, 20.0))
                             .fill(mark_fill)
                             .stroke(Stroke::new(1.0, mark_edge));
                             if ui.add(b).on_hover_text(mark_hint).clicked() {
@@ -2428,7 +2428,7 @@ impl App {
                         // Marks the row whose detail panel is open below, so
                         // the table and the panel always agree.
                         if is_open {
-                            ui.label(RichText::new("?").size(11.0).color(tone));
+                            ui.label(RichText::new("●").size(11.0).color(tone));
                         }
                     });
                     ui.end_row();
@@ -2673,12 +2673,11 @@ impl App {
 
     fn settings_tab(&mut self, ui: &mut egui::Ui) {
         let dark = ui.visuals().dark_mode;
-        let tone = accent(Mode::Quiet, dark);
         ui.add_space(4.0);
         let mut changed = false;
 
         section(ui, "Launch");
-        panel_card(ui, tone, |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             let before = self.settings.start_with_system;
             ui.checkbox(&mut self.settings.start_with_system, "Start with Windows");
             if before != self.settings.start_with_system {
@@ -2710,7 +2709,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Power watching");
-        panel_card(ui, tone, |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             ui.checkbox(
                 &mut self.settings.auto_switch_on_power_change,
                 "Re-apply automatically when the charger changes",
@@ -2732,7 +2731,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Behaviour");
-        panel_card(ui, tone, |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             ui.checkbox(
                 &mut self.settings.confirm_before_apply,
                 "Ask before applying a mode",
@@ -2753,7 +2752,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Appearance");
-        panel_card(ui, tone, |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             ui.horizontal(|ui| {
                 ui.label("Theme");
                 for t in [Theme::System, Theme::Light, Theme::Dark] {
@@ -2770,7 +2769,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Elevation");
-        panel_card(ui, tone, |ui| {
+        panel_card(ui, stroke(dark), |ui| {
             if self.elevated_ready {
                 ui.label(
                     RichText::new("Background task registered")

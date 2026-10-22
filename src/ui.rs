@@ -2845,7 +2845,7 @@ impl App {
 
         ui.add_space(10.0);
         section(ui, "Reset to defaults");
-        self.reset_to_defaults(ui, &mut changed, tone);
+        self.reset_to_defaults(ui, &mut changed);
 
         ui.add_space(10.0);
         section(ui, "Safety");
@@ -2878,7 +2878,7 @@ impl App {
 
     /// Reset all settings to their defaults, with confirmation so a stray
     /// click can't wipe the user's configuration.
-    fn reset_to_defaults(&mut self, ui: &mut egui::Ui, changed: &mut bool, tone: egui::Color32) {
+    fn reset_to_defaults(&mut self, ui: &mut egui::Ui, changed: &mut bool) {
         panel_card(ui, warn_color(), |ui| {
             if self.reset_confirm {
                 ui.label(
@@ -2899,7 +2899,7 @@ impl App {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     if ui.button("Reset").clicked() {
-                        *self.settings = Settings::default();
+                        self.settings = Settings::default();
                         *changed = true;
                         self.reset_confirm = false;
                         self.note("settings reset to defaults", NoteKind::Warn);

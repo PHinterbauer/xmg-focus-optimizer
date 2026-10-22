@@ -778,20 +778,6 @@ impl App {
                     );
                 }
             }
-        } else {
-            // Pick up results from auto-switch jobs, which run without setting
-            // `busy`. Without this the drift check stays stale after a charger
-            // change because the PowerChanged handler rechecks before the worker
-            // has finished applying.
-            if let Some(r) = jobs::take_result() {
-                log_info!("auto-switch result picked up: ok={} {}", r.ok, r.summary);
-                self.refresh();
-                self.recheck_drift();
-                ctx.request_repaint();
-                if !r.ok {
-                    self.note(format!("auto-switch failed: {}", r.summary), NoteKind::Err);
-                }
-            }
         }
     }
 }
@@ -802,11 +788,22 @@ impl eframe::App for App {
         self.ensure_tray();
         self.poll_tray();
         self.poll_events();
+        // Pick up results from auto-switch jobs, which run without setting
+        // `busy`. Without this the drift check stays stale after a charger
+        // change because the PowerChanged handler rechecks before the worker
+        // has finished applying.
+        if let Some(r) = jobs::take_result() {
+            log_info!("auto-switch result picked up: ok={} {}", r.ok, r.summary);
+            self.refresh();
+            self.recheck_drift();
+            ctx.request_repaint();
+            if !r.ok {
+                self.note(format!("auto-switch failed: {}", r.summary), NoteKind::Err);
+            }
+        }
         // When visible, repaint every frame for smooth UI. When hidden (tray),
-        // a separate ticker thread (spawned in App::new) calls request_repaint()
-        // every 250 ms so logic() keeps running for tray polling and auto-switch.
-        // request_repaint_after() does not reliably wake the event loop while
-        // the window is hidden, which broke auto-switch detection.
+        // the repaint ticker thread wakes logic() every 250 ms so tray polling
+        // and auto-switch keep working without continuous rendering.
         if self.temps_visible.load(std::sync::atomic::Ordering::Relaxed) {
             ctx.request_repaint();
         }

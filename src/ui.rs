@@ -495,13 +495,8 @@ impl App {
     }
 
     fn recheck_drift(&mut self) {
-        // Default mode restores factory values from the initial backup -
-        // there's nothing to drift-check against since profile::plan() doesn't
-        // know the backup values.
-        if self.settings.mode == Mode::Default {
-            self.drift = None;
-            return;
-        }
+        // Default mode restores factory values from the initial backup —
+        // drift check compares against those same values (same on AC/DC).
         let d = drift::check(
             self.settings.mode,
             self.on_ac,
@@ -1037,7 +1032,7 @@ impl eframe::App for App {
                         // answer - running LibreHardwareMonitor fills it in.
                         if let Ok(t) = self.temps.try_lock() {
                             match t.gpu {
-                                Some(g) => pill(ui, &format!("GPU {g:.0}-"), g < 80.0),
+                                Some(g) => pill(ui, &format!("GPU {g:.0}°"), g < 80.0),
                                 None => {
                                     pill_plain(ui, "GPU -").on_hover_text(
                                         "No GPU reading - nvidia-smi gave no value.",
@@ -1045,7 +1040,7 @@ impl eframe::App for App {
                                 }
                             }
                             match t.cpu {
-                                Some(c) => pill(ui, &format!("CPU {c:.0}-"), c < 85.0),
+                                Some(c) => pill(ui, &format!("CPU {c:.0}°"), c < 85.0),
                                 None => {
                                     pill_plain(ui, "CPU -").on_hover_text(
                                         "No CPU sensor found - checked LibreHardwareMonitor, \
@@ -1445,6 +1440,7 @@ impl App {
             for (i, mode) in [Mode::Quiet, Mode::Performance, Mode::Default].iter().enumerate() {
                 let selected = self.settings.mode == *mode;
                 let tone = accent(*mode, dark);
+                cols[i].shrink_width(8.0);
                 cols[i].add_space(4.0);
                 let clicked = card(&mut cols[i], selected, tone, |ui| {
                     ui.horizontal(|ui| {

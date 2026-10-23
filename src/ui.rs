@@ -495,6 +495,13 @@ impl App {
     }
 
     fn recheck_drift(&mut self) {
+        // Default mode restores factory values from the initial backup -
+        // there's nothing to drift-check against since profile::plan() doesn't
+        // know the backup values.
+        if self.settings.mode == Mode::Default {
+            self.drift = None;
+            return;
+        }
         let d = drift::check(
             self.settings.mode,
             self.on_ac,
@@ -1434,8 +1441,8 @@ impl App {
         ui.add_space(18.0);
         section(ui, "Profiles");
 
-        ui.columns(2, |cols| {
-            for (i, mode) in [Mode::Quiet, Mode::Performance].iter().enumerate() {
+        ui.columns(3, |cols| {
+            for (i, mode) in [Mode::Quiet, Mode::Performance, Mode::Default].iter().enumerate() {
                 let selected = self.settings.mode == *mode;
                 let tone = accent(*mode, dark);
                 cols[i].add_space(4.0);
@@ -1483,53 +1490,67 @@ impl App {
                         // columns() hands the closure a `[Ui; N]`, so each cell is indexed by value
                     // and has to be re-borrowed mutably.
                     figure(&mut c[0], "CPU cap", format!("{}%", p.cpu_max));
-                        figure(&mut c[1], "GPU limit", format!("{} W", p.gpu_watts));
+                        let gpu_label = if p.gpu_watts == 0 {
+                            "auto".to_string()
+                        } else {
+                            format!("{} W", p.gpu_watts)
+                        };
+                        figure(&mut c[1], "GPU limit", gpu_label);
                         figure(&mut c[0], "Efficiency", format!("{}", p.epp));
                         figure(&mut c[1], "Fans", p.fan_mode.label());
                     });
 
-                    // What this profile does on each power source. A mode is
-                    // not one set of numbers: mains and battery get different
-                    // values, and the charger switch swaps between them.
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new("When the charger changes, this profile becomes:")
-                            .size(11.5)
-                            .color(ui.visuals().weak_text_color()),
-                    );
-                    // The refresh rate does not vary by power source (Quiet is
-                    // fixed, Performance is the panel maximum), so it is
-                    // resolved once per card, not per row.
-                    let hz = crate::display::label_for_mode(*mode);
-                    for (src_label, src_ac) in [("On mains", true), ("On battery", false)] {
-                        let sp = profile::Params::for_mode(*mode, src_ac);
-                        let live = src_ac == on_ac;
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(if live { "?" } else { "?" })
-                                    .size(11.0)
+                    // What this profile does on each power source. Quiet and
+                    // Performance have different values on mains and battery;
+                    // Default keeps the same factory values either way.
+                    if *mode != Mode::Default {
+                        ui.add_space(10.0);
+                        ui.label(
+                            RichText::new("When the charger changes, this profile becomes:")
+                                .size(11.5)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        // The refresh rate does not vary by power source (Quiet is
+                        // fixed, Performance is the panel maximum), so it is
+                        // resolved once per card, not per row.
+                        let hz = crate::display::label_for_mode(*mode);
+                        for (src_label, src_ac) in [("On mains", true), ("On battery", false)] {
+                            let sp = profile::Params::for_mode(*mode, src_ac);
+                            let live = src_ac == on_ac;
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(if live { "?" } else { "?" })
+                                        .size(11.0)
+                                        .color(if live {
+                                            tone
+                                        } else {
+                                            ui.visuals().weak_text_color()
+                                        }),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{src_label}: CPU {}% - GPU {} W - {hz} - brightness {}% - fans {}",
+                                        sp.cpu_max,
+                                        sp.gpu_watts,
+                                        sp.brightness,
+                                        sp.fan_mode.label()
+                                    ))
+                                    .size(12.0)
                                     .color(if live {
-                                        tone
+                                        ui.visuals().text_color()
                                     } else {
                                         ui.visuals().weak_text_color()
                                     }),
-                            );
-                            ui.label(
-                                RichText::new(format!(
-                                    "{src_label}: CPU {}% - GPU {} W - {hz} - brightness {}% - fans {}",
-                                    sp.cpu_max,
-                                    sp.gpu_watts,
-                                    sp.brightness,
-                                    sp.fan_mode.label()
-                                ))
-                                .size(12.0)
-                                .color(if live {
-                                    ui.visuals().text_color()
-                                } else {
-                                    ui.visuals().weak_text_color()
-                                }),
-                            );
-                        });
+                                );
+                            });
+                        }
+                    } else {
+                        ui.add_space(10.0);
+                        ui.label(
+                            RichText::new("Same settings on mains and battery - no automatic switching.")
+                                .size(11.5)
+                                .color(ui.visuals().weak_text_color()),
+                        );
                     }
                 });
                 if clicked && !selected && !self.busy {

@@ -211,7 +211,7 @@ XMG Focus Optimizer - safe performance modes for the SCHENKER XMG FOCUS
 
   XMG-Optimizer.exe                  open the window
   XMG-Optimizer.exe --tray           start hidden in the notification area
-  XMG-Optimizer.exe apply quiet      apply a mode   (quiet | performance)
+  XMG-Optimizer.exe apply quiet      apply a mode   (quiet | performance | default)
   XMG-Optimizer.exe restore          restore the initial backup
   XMG-Optimizer.exe restore snapshot restore the most recent snapshot
   XMG-Optimizer.exe snapshot         save a snapshot of the current state

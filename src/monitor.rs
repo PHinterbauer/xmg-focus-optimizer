@@ -63,6 +63,17 @@ pub fn spawn(settings: Settings, tx: Sender<MonitorEvent>) -> Arc<AtomicBool> {
                     continue;
                 }
 
+                // Default mode keeps factory values on both power sources -
+                // there is nothing to switch between.
+                if live.mode == Mode::Default {
+                    let _ = tx.send(MonitorEvent::PowerChanged {
+                        on_ac,
+                        mode: live.mode,
+                        triggered: false,
+                    });
+                    continue;
+                }
+
                 // Silent by design: this runs on a background thread with no
                 // window to explain a UAC prompt, so a prompt here would just
                 // appear out of nowhere on every plug and unplug.

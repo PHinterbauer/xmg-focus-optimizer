@@ -105,6 +105,7 @@ pub fn describe_reason(reason: &str) -> String {
     match reason {
         "before-quiet" => "Before applying Quiet".into(),
         "before-performance" => "Before applying Performance".into(),
+        "before-default" => "Before applying Default".into(),
         "before-restore" => "Before restoring a snapshot".into(),
         "before-restore-to-initial" => "Before restoring the initial backup".into(),
         "manual" => "Manual snapshot".into(),
@@ -120,6 +121,7 @@ pub fn snapshot_mode(reason: &str) -> Option<crate::profile::Mode> {
     match reason {
         "before-quiet" => Some(crate::profile::Mode::Quiet),
         "before-performance" => Some(crate::profile::Mode::Performance),
+        "before-default" => Some(crate::profile::Mode::Default),
         _ => None,
     }
 }

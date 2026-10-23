@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 pub enum Mode {
     Quiet,
     Performance,
+    Default,
 }
 
 impl std::fmt::Display for Mode {
@@ -29,18 +30,21 @@ impl Mode {
         match self {
             Mode::Quiet => "Quiet",
             Mode::Performance => "Performance",
+            Mode::Default => "Default",
         }
     }
     pub fn other(self) -> Mode {
         match self {
             Mode::Quiet => Mode::Performance,
             Mode::Performance => Mode::Quiet,
+            Mode::Default => Mode::Default,
         }
     }
     pub fn tagline(self) -> &'static str {
         match self {
             Mode::Quiet => "Cool, silent and long-lasting",
             Mode::Performance => "Full power, full speed",
+            Mode::Default => "Factory values, same on battery and mains",
         }
     }
     pub fn blurb(self) -> &'static str {
@@ -51,11 +55,16 @@ impl Mode {
             Mode::Performance => "Unlocks the CPU boost, drops every power saving, lifts the GPU \
                           watt limit to the hardware maximum and runs the fans on turbo so the \
                           machine never thermally throttles.",
+            Mode::Default => "Restores the factory power values from the initial backup. \
+                          Stays the same whether you are on battery or mains - no automatic \
+                          switching.",
         }
     }
     pub fn parse(s: &str) -> Mode {
         if s.eq_ignore_ascii_case("performance") {
             Mode::Performance
+        } else if s.eq_ignore_ascii_case("default") {
+            Mode::Default
         } else {
             Mode::Quiet
         }
@@ -204,6 +213,30 @@ impl Params {
                 gpu_watts: 60,
                 fan_mode: FanMode::Turbo,
                 fan_offset: 100,
+                noiseless: false,
+            },
+            // -------------------------------------------------- Default
+            // Factory values from the initial backup: same on AC and DC,
+            // no automatic switching between power sources.
+            (Mode::Default, _) => Params {
+                cpu_max: 100,
+                cpu_min: 5,
+                epp: 50,
+                boost: 0,
+                inc_thresh: 25,
+                dec_thresh: 25,
+                cooling: 1,
+                igpu: 2,
+                gpu_pref: 0,
+                wifi: 0,
+                standby: 600,
+                hibernate: 1200,
+                display: 600,
+                dim: 1,
+                brightness: 100,
+                gpu_watts: 0, // 0 means "let Windows decide" / no limit
+                fan_mode: FanMode::Automatic,
+                fan_offset: 0,
                 noiseless: false,
             },
         }

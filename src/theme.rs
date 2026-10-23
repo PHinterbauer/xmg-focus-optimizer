@@ -171,6 +171,9 @@ pub fn accent(mode: Mode, dark: bool) -> Color32 {
         (Mode::Quiet, false) => ACCENT_700,
         (Mode::Performance, true) => ACCENT_500,
         (Mode::Performance, false) => ACCENT_900,
+        // Default is neutral gray - not a performance mode
+        (Mode::Default, true) => egui::Color32::from_gray(120),
+        (Mode::Default, false) => egui::Color32::from_gray(140),
     }
 }
 

@@ -121,6 +121,15 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: 
     // Use the power state the caller detected. Falling back to a fresh query
     // keeps old job files (without the field) working.
     let on_ac = on_ac.unwrap_or_else(power::on_ac_power);
+
+    // Default mode: restore factory values from the initial backup.
+    // Same values are applied to AC and DC columns - no automatic switching
+    // between power sources, and the charger watcher does not re-apply on
+    // plug changes while this mode is selected.
+    if mode == Mode::Default {
+        return do_apply_default_mode(&mut r, control_fans, control_gpu, control_display);
+    }
+
     let (params, entries) = profile::plan(mode, on_ac);
 
     // Idempotence: if the active scheme already holds this mode's values for
@@ -254,6 +263,93 @@ fn finish_apply(
         mode.label(),
         if on_ac { "mains power" } else { "battery" }
     );
+}
+
+/// Default mode: restore factory power values from the initial backup.
+/// Same values are applied to AC and DC columns - no automatic switching
+/// between power sources. Fans go to automatic; GPU limit and display are
+/// left at factory defaults.
+fn do_apply_default_mode(
+    r: &mut JobResult,
+    control_fans: bool,
+    control_gpu: bool,
+    control_display: bool,
+) -> JobResult {
+    let source = match backup::resolve_source(&RestoreSource::Factory) {
+        Ok(p) => p,
+        Err(e) => return JobResult::fail(format!("No initial backup found: {e}")),
+    };
+    let text = match std::fs::read_to_string(&source) {
+        Ok(t) => t,
+        Err(e) => return JobResult::fail(format!("Could not read initial backup: {e}")),
+    };
+    let rows = backup::parse_backup(&text);
+    if rows.is_empty() {
+        return JobResult::fail("Initial backup contains no settings".into());
+    }
+
+    let base = match power::active_scheme() {
+        Ok(g) => g,
+        Err(e) => return JobResult::fail(format!("Cannot read the active power scheme: {e}")),
+    };
+
+    cleanup_our_schemes(&base);
+
+    let new_guid = match power::duplicate_scheme(&base) {
+        Ok(g) => g,
+        Err(e) => return JobResult::fail(format!("Could not create a power scheme: {e}")),
+    };
+    let label = format!("{SCHEME_PREFIX}{}", Mode::Default.label());
+    let desc = format!(
+        "{} | factory defaults | {}",
+        Mode::Default.label(),
+        chrono::Local::now().format("%d.%m.%Y")
+    );
+    let _ = power::rename_scheme(&new_guid, &label, &desc);
+
+    let mut applied = 0usize;
+    let mut failed: Vec<String> = Vec::new();
+    for row in &rows {
+        // Default mode: same values on AC and DC - no switching behaviour.
+        match power::set_value(&new_guid, &row.subgroup, &row.setting, row.ac, row.dc) {
+            Ok(true) => applied += 1,
+            _ => failed.push(row.setting.chars().take(8).collect()),
+        }
+    }
+    let _ = power::set_active(&new_guid);
+
+    r.details.push(format!("Factory defaults: {applied} settings restored"));
+    if !failed.is_empty() {
+        r.warnings.push(format!("could not write: {}", failed.join(", ")));
+    }
+
+    // Fans to automatic
+    if control_fans {
+        match fans::apply(&profile::Params::for_mode(Mode::Default, true)) {
+            fans::FanOutcome::Applied(m) => r.details.push(format!("Fans: {m}")),
+            fans::FanOutcome::Unavailable(m) => r.warnings.push(format!("Fans: {m}")),
+            fans::FanOutcome::Failed(m) => r.warnings.push(format!("Fans: {m}")),
+        }
+    }
+
+    // GPU limit: leave at factory default (0 W means no limit, refused by
+    // set_limit_capped, so we skip it rather than forcing a value).
+    if control_gpu {
+        r.details.push("GPU limit: factory default (unchanged)".into());
+    }
+
+    // Display refresh rate: leave at factory default
+    if control_display {
+        r.details.push("Display: factory default (unchanged)".into());
+    }
+
+    let _ = std::fs::write(
+        crate::paths::app_data_dir().join("active-mode.txt"),
+        Mode::Default.label(),
+    );
+
+    r.summary = format!("{} applied", Mode::Default.label());
+    r
 }
 
 /// Deletes only power schemes this app created before.

@@ -27,6 +27,7 @@ pub struct Tray {
     show: MenuItem,
     quiet: MenuItem,
     performance: MenuItem,
+    default_: MenuItem,
     restore: MenuItem,
     quit: MenuItem,
 }
@@ -45,6 +46,8 @@ impl Tray {
                 out.push(TrayCommand::Apply(Mode::Quiet));
             } else if id == self.performance.id() {
                 out.push(TrayCommand::Apply(Mode::Performance));
+            } else if id == self.default_.id() {
+                out.push(TrayCommand::Apply(Mode::Default));
             } else if id == self.restore.id() {
                 out.push(TrayCommand::Restore);
             } else if id == self.quit.id() {
@@ -93,6 +96,7 @@ pub fn build(mode: Mode, on_ac: bool, dark: bool) -> Option<Tray> {
     let show = MenuItem::new("Open", true, None);
     let quiet = MenuItem::new("Apply Quiet", true, None);
     let performance = MenuItem::new("Apply Performance", true, None);
+    let default_ = MenuItem::new("Apply Default", true, None);
     let restore = MenuItem::new("Restore settings...", true, None);
     let quit = MenuItem::new("Quit", true, None);
 
@@ -101,6 +105,7 @@ pub fn build(mode: Mode, on_ac: bool, dark: bool) -> Option<Tray> {
     menu.append(&show).ok()?;
     menu.append(&quiet).ok()?;
     menu.append(&performance).ok()?;
+    menu.append(&default_).ok()?;
     menu.append(&restore).ok()?;
     menu.append(&PredefinedMenuItem::separator()).ok()?;
     menu.append(&quit).ok()?;
@@ -119,6 +124,7 @@ pub fn build(mode: Mode, on_ac: bool, dark: bool) -> Option<Tray> {
         show,
         quiet,
         performance,
+        default_,
         restore,
         quit,
     })

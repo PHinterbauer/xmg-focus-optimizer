@@ -36,6 +36,7 @@ pub fn hz_for_mode(mode: Mode) -> Option<u32> {
     match mode {
         Mode::Quiet => Some(QUIET_HZ),
         Mode::Performance => max_hz_cached(),
+        Mode::Default => None,
     }
 }
 
@@ -48,6 +49,7 @@ pub fn label_for_mode(mode: Mode) -> String {
             Some(m) => format!("{m} Hz max"),
             None => "max".into(),
         },
+        Mode::Default => "auto".into(),
     }
 }
 

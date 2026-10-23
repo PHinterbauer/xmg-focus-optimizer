@@ -15,10 +15,23 @@ use crate::profile::{self, FanMode, Mode};
 fn mode_labels_and_tags_are_set() {
     assert_eq!(Mode::Quiet.label(), "Quiet");
     assert_eq!(Mode::Performance.label(), "Performance");
+    assert_eq!(Mode::Default.label(), "Default");
     assert_eq!(Mode::Quiet.other(), Mode::Performance);
     assert_eq!(Mode::Performance.other(), Mode::Quiet);
+    assert_eq!(Mode::Default.other(), Mode::Default);
     assert!(!Mode::Quiet.tagline().is_empty());
     assert!(!Mode::Performance.tagline().is_empty());
+    assert!(!Mode::Default.tagline().is_empty());
+}
+
+#[test]
+fn default_mode_label_and_blurb() {
+    assert_eq!(Mode::Default.label(), "Default");
+    assert_eq!(Mode::Default.tagline(), "Factory values, same on battery and mains");
+    assert!(!Mode::Default.blurb().is_empty());
+    assert_eq!(Mode::parse("default"), Mode::Default);
+    assert_eq!(Mode::parse("DEFAULT"), Mode::Default);
+    assert_eq!(Mode::parse("Default"), Mode::Default);
 }
 
 #[test]
@@ -29,6 +42,21 @@ fn unknown_mode_name_falls_back_to_quiet() {
     assert_eq!(Mode::parse("Performance"), Mode::Performance);
     assert_eq!(Mode::parse("nonsense"), Mode::Quiet);
     assert_eq!(Mode::parse(""), Mode::Quiet);
+}
+
+#[test]
+fn default_mode_same_on_ac_and_dc() {
+    // Default mode must not change between power sources.
+    let ac = profile::Params::for_mode(Mode::Default, true);
+    let dc = profile::Params::for_mode(Mode::Default, false);
+    assert_eq!(ac.cpu_max, dc.cpu_max);
+    assert_eq!(ac.gpu_watts, dc.gpu_watts);
+    assert_eq!(ac.brightness, dc.brightness);
+    assert_eq!(ac.fan_mode, dc.fan_mode);
+    assert_eq!(ac.epp, dc.epp);
+    // GPU watts of 0 means "no limit" / automatic.
+    assert_eq!(ac.gpu_watts, 0);
+    assert_eq!(dc.gpu_watts, 0);
 }
 
 #[test]

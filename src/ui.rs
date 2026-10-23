@@ -1519,7 +1519,7 @@ impl App {
                             let live = src_ac == on_ac;
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new(if live { "?" } else { "?" })
+                                    RichText::new(if live { "●" } else { "○" })
                                         .size(11.0)
                                         .color(if live {
                                             tone

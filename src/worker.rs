@@ -278,27 +278,45 @@ fn do_apply_default_mode(
 ) {
     let source = match backup::resolve_source(&RestoreSource::Factory) {
         Ok(p) => p,
-        Err(e) => return JobResult::fail(format!("No initial backup found: {e}")),
+        Err(e) => {
+            r.ok = false;
+            r.summary = format!("No initial backup found: {e}");
+            return;
+        }
     };
     let text = match std::fs::read_to_string(&source) {
         Ok(t) => t,
-        Err(e) => return JobResult::fail(format!("Could not read initial backup: {e}")),
+        Err(e) => {
+            r.ok = false;
+            r.summary = format!("Could not read initial backup: {e}");
+            return;
+        }
     };
     let rows = backup::parse_backup(&text);
     if rows.is_empty() {
-        return JobResult::fail("Initial backup contains no settings".into());
+        r.ok = false;
+        r.summary = "Initial backup contains no settings".into();
+        return;
     }
 
     let base = match power::active_scheme() {
         Ok(g) => g,
-        Err(e) => return JobResult::fail(format!("Cannot read the active power scheme: {e}")),
+        Err(e) => {
+            r.ok = false;
+            r.summary = format!("Cannot read the active power scheme: {e}");
+            return;
+        }
     };
 
     cleanup_our_schemes(&base);
 
     let new_guid = match power::duplicate_scheme(&base) {
         Ok(g) => g,
-        Err(e) => return JobResult::fail(format!("Could not create a power scheme: {e}")),
+        Err(e) => {
+            r.ok = false;
+            r.summary = format!("Could not create a power scheme: {e}");
+            return;
+        }
     };
     let label = format!("{SCHEME_PREFIX}{}", Mode::Default.label());
     let desc = format!(

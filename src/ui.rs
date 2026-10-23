@@ -1440,9 +1440,9 @@ impl App {
             for (i, mode) in [Mode::Quiet, Mode::Performance, Mode::Default].iter().enumerate() {
                 let selected = self.settings.mode == *mode;
                 let tone = accent(*mode, dark);
-                cols[i].shrink_width(8.0);
                 cols[i].add_space(4.0);
                 let clicked = card(&mut cols[i], selected, tone, |ui| {
+                    ui.set_max_width(ui.available_width() - 8.0);
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::Image::new(&icon::texture(ui.ctx()))

@@ -127,7 +127,8 @@ fn do_apply(mode: Mode, control_fans: bool, control_gpu: bool, control_display: 
     // between power sources, and the charger watcher does not re-apply on
     // plug changes while this mode is selected.
     if mode == Mode::Default {
-        return do_apply_default_mode(&mut r, control_fans, control_gpu, control_display);
+        do_apply_default_mode(&mut r, control_fans, control_gpu, control_display);
+        return r;
     }
 
     let (params, entries) = profile::plan(mode, on_ac);
@@ -274,7 +275,7 @@ fn do_apply_default_mode(
     control_fans: bool,
     control_gpu: bool,
     control_display: bool,
-) -> JobResult {
+) {
     let source = match backup::resolve_source(&RestoreSource::Factory) {
         Ok(p) => p,
         Err(e) => return JobResult::fail(format!("No initial backup found: {e}")),
@@ -349,7 +350,6 @@ fn do_apply_default_mode(
     );
 
     r.summary = format!("{} applied", Mode::Default.label());
-    r
 }
 
 /// Deletes only power schemes this app created before.
